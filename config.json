@@ -1,0 +1,312 @@
+{
+  "concurrent_workers": 16,
+  "rpcs": {
+    "ethereum": {
+      "name": "Ethereum Mainnet",
+      "rpc_url": "https://eth-mainnet.g.alchemy.com/v2/${ALCHEMY_API_KEY}",
+      "native_symbol": "ETH",
+      "evm": true
+    },
+    "arbitrum": {
+      "name": "Arbitrum One",
+      "rpc_url": "https://arb-mainnet.g.alchemy.com/v2/${ALCHEMY_API_KEY}",
+      "native_symbol": "ETH",
+      "evm": true
+    },
+    "base": {
+      "name": "Base",
+      "rpc_url": "https://base-mainnet.g.alchemy.com/v2/${ALCHEMY_API_KEY}",
+      "native_symbol": "ETH",
+      "evm": true
+    },
+    "optimism": {
+      "name": "Optimism",
+      "rpc_url": "https://opt-mainnet.g.alchemy.com/v2/${ALCHEMY_API_KEY}",
+      "native_symbol": "ETH",
+      "evm": true
+    },
+    "polygon": {
+      "name": "Polygon",
+      "rpc_url": "https://polygon-mainnet.g.alchemy.com/v2/${ALCHEMY_API_KEY}",
+      "native_symbol": "MATIC",
+      "evm": true
+    },
+    "bsc": {
+      "name": "BNB Smart Chain",
+      "rpc_url": "https://bsc-dataseed.binance.org/",
+      "native_symbol": "BNB",
+      "evm": true
+    },
+    "opbnb": {
+      "name": "opBNB",
+      "rpc_url": "https://opbnb-mainnet.g.alchemy.com/v2/${ALCHEMY_API_KEY}",
+      "native_symbol": "BNB",
+      "evm": true
+    },
+    "avax": {
+      "name": "Avalanche C-Chain",
+      "rpc_url": "https://avax-mainnet.g.alchemy.com/v2/${ALCHEMY_API_KEY}",
+      "native_symbol": "AVAX",
+      "evm": true
+    },
+    "linea": {
+      "name": "Linea",
+      "rpc_url": "https://linea-mainnet.g.alchemy.com/v2/${ALCHEMY_API_KEY}",
+      "native_symbol": "ETH",
+      "evm": true
+    },
+    "scroll": {
+      "name": "Scroll",
+      "rpc_url": "https://scroll-mainnet.g.alchemy.com/v2/${ALCHEMY_API_KEY}",
+      "native_symbol": "ETH",
+      "evm": true
+    },
+    "blast": {
+      "name": "Blast",
+      "rpc_url": "https://blast-mainnet.g.alchemy.com/v2/${ALCHEMY_API_KEY}",
+      "native_symbol": "ETH",
+      "evm": true
+    },
+    "mantle": {
+      "name": "Mantle",
+      "rpc_url": "https://mantle-mainnet.g.alchemy.com/v2/${ALCHEMY_API_KEY}",
+      "native_symbol": "MNT",
+      "evm": true
+    },
+    "polygonzkevm": {
+      "name": "Polygon zkEVM",
+      "rpc_url": "https://polygonzkevm-mainnet.g.alchemy.com/v2/${ALCHEMY_API_KEY}",
+      "native_symbol": "ETH",
+      "evm": true
+    },
+    "berachain": {
+      "name": "Berachain",
+      "rpc_url": "https://berachain-mainnet.g.alchemy.com/v2/${ALCHEMY_API_KEY}",
+      "native_symbol": "BERA",
+      "evm": true
+    },
+    "mode": {
+      "name": "Mode",
+      "rpc_url": "https://mode-mainnet.g.alchemy.com/v2/${ALCHEMY_API_KEY}",
+      "native_symbol": "ETH",
+      "evm": true
+    },
+    "zora": {
+      "name": "Zora",
+      "rpc_url": "https://zora-mainnet.g.alchemy.com/v2/${ALCHEMY_API_KEY}",
+      "native_symbol": "ETH",
+      "evm": true
+    },
+    "unichain": {
+      "name": "Unichain",
+      "rpc_url": "https://unichain-mainnet.g.alchemy.com/v2/${ALCHEMY_API_KEY}",
+      "native_symbol": "ETH",
+      "evm": true
+    },
+    "worldchain": {
+      "name": "World Chain",
+      "rpc_url": "https://worldchain-mainnet.g.alchemy.com/v2/${ALCHEMY_API_KEY}",
+      "native_symbol": "ETH",
+      "evm": true
+    },
+    "frax": {
+      "name": "Frax",
+      "rpc_url": "https://frax-mainnet.g.alchemy.com/v2/${ALCHEMY_API_KEY}",
+      "native_symbol": "FRAX",
+      "evm": true
+    },
+    "abstract": {
+      "name": "Abstract",
+      "rpc_url": "https://abstract-mainnet.g.alchemy.com/v2/${ALCHEMY_API_KEY}",
+      "native_symbol": "ETH",
+      "evm": true
+    },
+    "apechain": {
+      "name": "ApeChain",
+      "rpc_url": "https://apechain-mainnet.g.alchemy.com/v2/${ALCHEMY_API_KEY}",
+      "native_symbol": "APE",
+      "evm": true
+    },
+    "arbnova": {
+      "name": "Arb Nova",
+      "rpc_url": "https://arbnova-mainnet.g.alchemy.com/v2/${ALCHEMY_API_KEY}",
+      "native_symbol": "ETH",
+      "evm": true
+    },
+    "astar": {
+      "name": "Astar",
+      "rpc_url": "https://astar-mainnet.g.alchemy.com/v2/${ALCHEMY_API_KEY}",
+      "native_symbol": "ASTR",
+      "evm": true
+    },
+    "aurora": {
+      "name": "Aurora",
+      "rpc_url": "https://aurora-mainnet.g.alchemy.com/v2/${ALCHEMY_API_KEY}",
+      "native_symbol": "AURORA",
+      "evm": true
+    },
+    "bitcoin": {
+      "name": "Bitcoin",
+      "rpc_url": "https://bitcoin-mainnet.g.alchemy.com/v2/${ALCHEMY_API_KEY}",
+      "native_symbol": "BTC",
+      "evm": false
+    },
+    "bob": {
+      "name": "BOB",
+      "rpc_url": "https://bob-mainnet.g.alchemy.com/v2/${ALCHEMY_API_KEY}",
+      "native_symbol": "ETH",
+      "evm": true
+    },
+    "boba": {
+      "name": "Boba Network",
+      "rpc_url": "https://boba-mainnet.g.alchemy.com/v2/${ALCHEMY_API_KEY}",
+      "native_symbol": "BOBA",
+      "evm": true
+    },
+    "botanix": {
+      "name": "Botanix",
+      "rpc_url": "https://botanix-mainnet.g.alchemy.com/v2/${ALCHEMY_API_KEY}",
+      "native_symbol": "ETH",
+      "evm": true
+    },
+    "celo": {
+      "name": "Celo",
+      "rpc_url": "https://celo-mainnet.g.alchemy.com/v2/${ALCHEMY_API_KEY}",
+      "native_symbol": "CELO",
+      "evm": true
+    },
+    "core": {
+      "name": "Core",
+      "rpc_url": "https://core-mainnet.g.alchemy.com/v2/${ALCHEMY_API_KEY}",
+      "native_symbol": "CORE",
+      "evm": true
+    },
+    "cronos": {
+      "name": "Cronos",
+      "rpc_url": "https://cronos-mainnet.g.alchemy.com/v2/${ALCHEMY_API_KEY}",
+      "native_symbol": "CRO",
+      "evm": true
+    },
+    "degen": {
+      "name": "Degen Chain",
+      "rpc_url": "https://degen-mainnet.g.alchemy.com/v2/${ALCHEMY_API_KEY}",
+      "native_symbol": "DEGEN",
+      "evm": true
+    },
+    "fantom": {
+      "name": "Fantom",
+      "rpc_url": "https://fantom-mainnet.g.alchemy.com/v2/${ALCHEMY_API_KEY}",
+      "native_symbol": "FTM",
+      "evm": true
+    },
+    "flow": {
+      "name": "Flow",
+      "rpc_url": "https://flow-mainnet.g.alchemy.com/v2/${ALCHEMY_API_KEY}",
+      "native_symbol": "FLOW",
+      "evm": false
+    },
+    "gnosis": {
+      "name": "Gnosis Chain",
+      "rpc_url": "https://gnosis-mainnet.g.alchemy.com/v2/${ALCHEMY_API_KEY}",
+      "native_symbol": "xDAI",
+      "evm": true
+    },
+    "hyperliquid": {
+      "name": "Hyperliquid",
+      "rpc_url": "https://hyperliquid-mainnet.g.alchemy.com/v2/${ALCHEMY_API_KEY}",
+      "native_symbol": "HLP",
+      "evm": true
+    },
+    "kava": {
+      "name": "Kava",
+      "rpc_url": "https://kava-mainnet.g.alchemy.com/v2/${ALCHEMY_API_KEY}",
+      "native_symbol": "KAVA",
+      "evm": true
+    },
+    "metis": {
+      "name": "Metis",
+      "rpc_url": "https://metis-mainnet.g.alchemy.com/v2/${ALCHEMY_API_KEY}",
+      "native_symbol": "METIS",
+      "evm": true
+    },
+    "moonbeam": {
+      "name": "Moonbeam",
+      "rpc_url": "https://moonbeam-mainnet.g.alchemy.com/v2/${ALCHEMY_API_KEY}",
+      "native_symbol": "GLMR",
+      "evm": true
+    },
+    "ronin": {
+      "name": "Ronin",
+      "rpc_url": "https://ronin-mainnet.g.alchemy.com/v2/${ALCHEMY_API_KEY}",
+      "native_symbol": "RON",
+      "evm": true
+    },
+    "sei": {
+      "name": "Sei",
+      "rpc_url": "https://sei-mainnet.g.alchemy.com/v2/${ALCHEMY_API_KEY}",
+      "native_symbol": "SEI",
+      "evm": true
+    },
+    "shape": {
+      "name": "Shape",
+      "rpc_url": "https://shape-mainnet.g.alchemy.com/v2/${ALCHEMY_API_KEY}",
+      "native_symbol": "ETH",
+      "evm": true
+    },
+    "solana": {
+      "name": "Solana",
+      "rpc_url": "https://solana-mainnet.g.alchemy.com/v2/${ALCHEMY_API_KEY}",
+      "native_symbol": "SOL",
+      "evm": false
+    },
+    "starknet": {
+      "name": "Starknet",
+      "rpc_url": "https://starknet-mainnet.g.alchemy.com/starknet/version/rpc/v0_9/${ALCHEMY_API_KEY}",
+      "native_symbol": "STRK",
+      "evm": false
+    },
+    "zetachain": {
+      "name": "ZetaChain",
+      "rpc_url": "https://zetachain-mainnet.g.alchemy.com/v2/${ALCHEMY_API_KEY}",
+      "native_symbol": "ZETA",
+      "evm": true
+    },
+    "soneium": {
+      "name": "Soneium",
+      "rpc_url": "https://soneium-mainnet.g.alchemy.com/v2/${ALCHEMY_API_KEY}",
+      "native_symbol": "ETH",
+      "evm": true
+    }
+    },
+  "debank": {
+    "enabled": true,
+    "base_url": "https://pro-openapi.debank.com",
+    "timeout": 15
+  },
+  "telegram": {
+    "enabled": false,
+    "batch_report_interval": 60,
+    "min_balance_alert": 0.01
+  },
+  "scanning": {
+    "batch_size": 100,
+    "save_interval": 50,
+    "progress_update_interval": 5
+  },
+  "phrase_finder": {
+    "max_wildcards": 3,
+    "warn_threshold_combinations": 1000000,
+    "auto_save_progress": true
+  },
+  "output": {
+    "save_empty_wallets": true,
+    "compress_results": false,
+    "backup_on_exit": false
+  },
+  "advanced": {
+    "verify_checksum": true,
+    "derivation_path": "m/44'/60'/0'/0/0",
+    "check_contract_addresses": false,
+    "timeout_per_wallet": 30
+  }
+}
