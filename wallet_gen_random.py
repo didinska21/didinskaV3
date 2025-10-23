@@ -19,8 +19,8 @@ from dotenv import load_dotenv
 # Add utils to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'utils'))
 
-from colors import Colors
-from ui import print_box, print_loader, print_progress_bar, print_stats_box
+from utils.colors import Colors
+from utils.ui import print_box, print_loader, print_progress_bar, print_stats_box
 
 try:
     from web3 import Web3, HTTPProvider
