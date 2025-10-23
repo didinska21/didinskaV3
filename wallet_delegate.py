@@ -6,6 +6,7 @@ wallet_delegate.py - Smart-Contract based Delegate Wallet (Menu 3)
 - Kelola sink, pause/unpause, sweep
 - Simpan konfigurasi di delegate_rules.json
 """
+
 import os, sys, json, time
 from datetime import datetime
 from getpass import getpass
@@ -13,19 +14,34 @@ from getpass import getpass
 from dotenv import load_dotenv
 from eth_account import Account
 from web3 import Web3, HTTPProvider
-from web3.middleware import geth_poa_middleware
 
-# Tambah utils ke path
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'utils'))
+# ==== Web3 v6/v7 POA middleware compatibility ====
+try:
+    # Web3.py v7+
+    from web3.middleware import ExtraDataToPOAMiddleware as POA_MIDDLEWARE
+except ImportError:
+    # Web3.py v6
+    from web3.middleware import geth_poa_middleware as POA_MIDDLEWARE
+
+# ==== Path setup (pastikan base project ada di sys.path) ====
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+if BASE_DIR not in sys.path:
+    sys.path.insert(0, BASE_DIR)
+
+# utils/*
 from utils.colors import Colors
-from utils.ui import print_box, print_loader, print_progress_bar, print_stats_box, print_section_header, print_warning, print_error, print_success
+from utils.ui import (
+    print_box, print_loader, print_progress_bar, print_stats_box,
+    print_section_header, print_warning, print_error, print_success, print_info
+)
 
-load_dotenv()
+# .env di root modul ini
+load_dotenv(os.path.join(BASE_DIR, ".env"))
 
 # ---------- Konstanta & File ----------
-CONFIG_FILE   = os.getenv("CONFIG_FILE", "config.json")
-CHAIN_FILE    = os.path.join("utils", "chain.json")  # daftar chain (RPC + chainId + simbol)
-RULES_FILE    = "delegate_rules.json"               # simpan daftar kontrak delegate
+CONFIG_FILE = os.getenv("CONFIG_FILE", os.path.join(BASE_DIR, "config.json"))
+CHAIN_FILE  = os.path.join(BASE_DIR, "utils", "chain.json")   # daftar chain (RPC + chainId + simbol)
+RULES_FILE  = os.path.join(BASE_DIR, "delegate_rules.json")   # simpan daftar kontrak delegate
 
 # ---------- Kontrak Solidity (inline) ----------
 SOL_SOURCE = r"""
@@ -108,7 +124,7 @@ contract DelegateWallet {
 }
 """
 
-# compile on the fly (py-solc-x)
+# ---------- Compiler ----------
 def compile_contract():
     try:
         from solcx import compile_standard, install_solc, set_solc_version
@@ -117,7 +133,6 @@ def compile_contract():
         return None, None
 
     try:
-        # Pastikan versi compiler ada
         install_solc("0.8.24")
         set_solc_version("0.8.24")
 
@@ -149,8 +164,27 @@ def load_json(path, default):
         return default
 
 def save_json(path, data):
+    os.makedirs(os.path.dirname(path), exist_ok=True) if os.path.dirname(path) else None
     with open(path, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2, ensure_ascii=False)
+
+def _guess_fees(w3):
+    """Return dict fee fields compatible with EIP-1559 chains; fallback ke legacy."""
+    try:
+        # EIP-1559
+        base = w3.eth.gas_price  # cepat & cukup aman di banyak chain
+        return {
+            "maxFeePerGas": int(base * 2),
+            "maxPriorityFeePerGas": w3.to_wei(1, "gwei"),
+        }
+    except Exception:
+        # Legacy
+        gp = w3.to_wei(3, "gwei")
+        try:
+            gp = w3.eth.gas_price
+        except Exception:
+            pass
+        return {"gasPrice": int(gp)}
 
 def connect_chain(chain_key):
     chains = load_json(CHAIN_FILE, {})
@@ -170,9 +204,10 @@ def connect_chain(chain_key):
         rpc = rpc.replace("${ALCHEMY_API_KEY}", alchemy)
 
     w3 = Web3(HTTPProvider(rpc, request_kwargs={"timeout": 15}))
-    # POA chains (sebagian L2) kadang butuh middleware ini
+
+    # POA chains (banyak L2) perlu middleware di layer 0
     try:
-        w3.middleware_onion.inject(geth_poa_middleware, layer=0)
+        w3.middleware_onion.inject(POA_MIDDLEWARE, layer=0)
     except Exception:
         pass
 
@@ -182,10 +217,9 @@ def connect_chain(chain_key):
 
     chain_id = info.get("chain_id")
     if not chain_id:
-        # fallback baca dari node
         try:
             chain_id = w3.eth.chain_id
-        except:
+        except Exception:
             chain_id = None
 
     return w3, chain_id
@@ -201,7 +235,7 @@ def prompt_pk():
 def checksum(w3, addr):
     try:
         return w3.to_checksum_address(addr)
-    except:
+    except Exception:
         return addr
 
 # ---------- Aksi Kontrak ----------
@@ -222,14 +256,15 @@ def deploy_delegate(chain_key, sink_addr):
     acct = Account.from_key(pk)
     nonce = w3.eth.get_transaction_count(acct.address)
 
+    fees = _guess_fees(w3)
+
     contract = w3.eth.contract(abi=abi, bytecode=bytecode)
     tx = contract.constructor(sink).build_transaction({
         "from": acct.address,
         "nonce": nonce,
         "chainId": chain_id,
-        "gas": 700000,  # konservatif
-        "maxFeePerGas": w3.eth.gas_price * 2 // 1 if hasattr(w3.eth, 'gas_price') else w3.to_wei(2, 'gwei'),
-        "maxPriorityFeePerGas": w3.to_wei(1, 'gwei'),
+        "gas": 700000,
+        **fees,
     })
 
     signed = acct.sign_transaction(tx)
@@ -272,8 +307,7 @@ def call_set_sink(chain_key, contract_addr, new_sink):
         "nonce": w3.eth.get_transaction_count(acct.address),
         "chainId": chain_id,
         "gas": 200000,
-        "maxFeePerGas": w3.eth.gas_price * 2 // 1 if hasattr(w3.eth, 'gas_price') else w3.to_wei(2, 'gwei'),
-        "maxPriorityFeePerGas": w3.to_wei(1, 'gwei'),
+        **_guess_fees(w3),
     })
     signed = acct.sign_transaction(tx)
     tx_hash = w3.eth.send_raw_transaction(signed.rawTransaction)
@@ -306,8 +340,7 @@ def call_pause(chain_key, contract_addr, to_pause=True):
         "nonce": w3.eth.get_transaction_count(acct.address),
         "chainId": chain_id,
         "gas": 150000,
-        "maxFeePerGas": w3.eth.gas_price * 2 // 1 if hasattr(w3.eth, 'gas_price') else w3.to_wei(2, 'gwei'),
-        "maxPriorityFeePerGas": w3.to_wei(1, 'gwei'),
+        **_guess_fees(w3),
     })
     signed = acct.sign_transaction(tx)
     tx_hash = w3.eth.send_raw_transaction(signed.rawTransaction)
@@ -333,8 +366,7 @@ def call_sweep(chain_key, contract_addr):
         "nonce": w3.eth.get_transaction_count(acct.address),
         "chainId": chain_id,
         "gas": 150000,
-        "maxFeePerGas": w3.eth.gas_price * 2 // 1 if hasattr(w3.eth, 'gas_price') else w3.to_wei(2, 'gwei'),
-        "maxPriorityFeePerGas": w3.to_wei(1, 'gwei'),
+        **_guess_fees(w3),
     })
     signed = acct.sign_transaction(tx)
     tx_hash = w3.eth.send_raw_transaction(signed.rawTransaction)
@@ -348,11 +380,13 @@ def call_sweep(chain_key, contract_addr):
 # ---------- UI ----------
 def list_delegates():
     rules = load_json(RULES_FILE, {})
-    if not rules:
+    if not rules or all(k == "default_sink" for k in rules.keys()):
         print_warning("Belum ada delegate terdaftar.")
         return
     lines = []
     for chain_key, items in rules.items():
+        if chain_key == "default_sink":
+            continue
         lines.append(f"{Colors.BOLD}{Colors.CYAN}Chain: {chain_key}{Colors.ENDC}")
         for i, it in enumerate(items, 1):
             lines.append(f"  {i}. Kontrak : {it['contract']}")
@@ -419,7 +453,7 @@ def menu_delegate():
             call_sweep(chain_key, contract_addr)
 
         elif ch == "7":
-            # hanya hapus dari file JSON lokal (tidak menyentuh on-chain)
+            # Hanya hapus dari file JSON lokal (tidak menyentuh on-chain)
             chain_key = input(f"{Colors.YELLOW}Chain key: {Colors.ENDC}").strip()
             contract_addr = input(f"{Colors.YELLOW}Alamat kontrak untuk dihapus dari daftar: {Colors.ENDC}").strip()
             rules = load_json(RULES_FILE, {})
