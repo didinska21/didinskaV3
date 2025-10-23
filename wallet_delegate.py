@@ -17,8 +17,8 @@ from web3.middleware import geth_poa_middleware
 
 # Tambah utils ke path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'utils'))
-from colors import Colors
-from ui import print_box, print_loader, print_progress_bar, print_stats_box, print_section_header, print_warning, print_error, print_success
+from utils.colors import Colors
+from utils.ui import print_box, print_loader, print_progress_bar, print_stats_box, print_section_header, print_warning, print_error, print_success
 
 load_dotenv()
 
