@@ -1,78 +1,21 @@
 [
-  // ===== MAINNETS =====
   {
     "key": "ethereum",
     "name": "Ethereum Mainnet",
     "native_symbol": "ETH",
     "decimals": 18,
     "threshold_native": 0.0002,
-    "reserve_native": 0.00002
+    "reserve_native": 0.00002,
+    "rpc_url": "https://eth-mainnet.g.alchemy.com/v2/${ALCHEMY_API_KEY}"
   },
-  {
-    "key": "bsc",
-    "name": "BNB Smart Chain",
-    "native_symbol": "BNB",
-    "decimals": 18,
-    "threshold_native": 0.0001,
-    "reserve_native": 0.0001
-  },
-  {
-    "key": "polygon",
-    "name": "Polygon",
-    "native_symbol": "MATIC",
-    "decimals": 18,
-    "threshold_native": 0.20,
-    "reserve_native": 0.05
-  },
-  {
-    "key": "avax",
-    "name": "Avalanche C-Chain",
-    "native_symbol": "AVAX",
-    "decimals": 18,
-    "threshold_native": 0.002,
-    "reserve_native": 0.0005
-  },
-  {
-    "key": "fantom",
-    "name": "Fantom",
-    "native_symbol": "FTM",
-    "decimals": 18,
-    "threshold_native": 0.5,
-    "reserve_native": 0.1
-  },
-  {
-    "key": "cronos",
-    "name": "Cronos",
-    "native_symbol": "CRO",
-    "decimals": 18,
-    "threshold_native": 0.5,
-    "reserve_native": 0.1
-  },
-  {
-    "key": "gnosis",
-    "name": "Gnosis Chain",
-    "native_symbol": "xDAI",
-    "decimals": 18,
-    "threshold_native": 0.5,
-    "reserve_native": 0.1
-  },
-
-  // ===== ETH LAYER-2 =====
   {
     "key": "arbitrum",
     "name": "Arbitrum One",
     "native_symbol": "ETH",
     "decimals": 18,
     "threshold_native": 0.0002,
-    "reserve_native": 0.00002
-  },
-  {
-    "key": "optimism",
-    "name": "Optimism",
-    "native_symbol": "ETH",
-    "decimals": 18,
-    "threshold_native": 0.0002,
-    "reserve_native": 0.00002
+    "reserve_native": 0.00002,
+    "rpc_url": "https://arb-mainnet.g.alchemy.com/v2/${ALCHEMY_API_KEY}"
   },
   {
     "key": "base",
@@ -80,15 +23,53 @@
     "native_symbol": "ETH",
     "decimals": 18,
     "threshold_native": 0.0002,
-    "reserve_native": 0.00002
+    "reserve_native": 0.00002,
+    "rpc_url": "https://base-mainnet.g.alchemy.com/v2/${ALCHEMY_API_KEY}"
   },
   {
-    "key": "scroll",
-    "name": "Scroll",
+    "key": "optimism",
+    "name": "Optimism",
     "native_symbol": "ETH",
     "decimals": 18,
     "threshold_native": 0.0002,
-    "reserve_native": 0.00002
+    "reserve_native": 0.00002,
+    "rpc_url": "https://opt-mainnet.g.alchemy.com/v2/${ALCHEMY_API_KEY}"
+  },
+  {
+    "key": "polygon",
+    "name": "Polygon",
+    "native_symbol": "MATIC",
+    "decimals": 18,
+    "threshold_native": 0.2,
+    "reserve_native": 0.05,
+    "rpc_url": "https://polygon-mainnet.g.alchemy.com/v2/${ALCHEMY_API_KEY}"
+  },
+  {
+    "key": "bsc",
+    "name": "BNB Smart Chain",
+    "native_symbol": "BNB",
+    "decimals": 18,
+    "threshold_native": 0.0001,
+    "reserve_native": 0.0001,
+    "rpc_url": "https://bsc-dataseed.binance.org/"
+  },
+  {
+    "key": "opbnb",
+    "name": "opBNB",
+    "native_symbol": "BNB",
+    "decimals": 18,
+    "threshold_native": 0.0001,
+    "reserve_native": 0.00005,
+    "rpc_url": "https://opbnb-mainnet.g.alchemy.com/v2/${ALCHEMY_API_KEY}"
+  },
+  {
+    "key": "avax",
+    "name": "Avalanche C-Chain",
+    "native_symbol": "AVAX",
+    "decimals": 18,
+    "threshold_native": 0.002,
+    "reserve_native": 0.0005,
+    "rpc_url": "https://avax-mainnet.g.alchemy.com/v2/${ALCHEMY_API_KEY}"
   },
   {
     "key": "linea",
@@ -96,15 +77,17 @@
     "native_symbol": "ETH",
     "decimals": 18,
     "threshold_native": 0.0002,
-    "reserve_native": 0.00002
+    "reserve_native": 0.00002,
+    "rpc_url": "https://linea-mainnet.g.alchemy.com/v2/${ALCHEMY_API_KEY}"
   },
   {
-    "key": "polygonzkevm",
-    "name": "Polygon zkEVM",
+    "key": "scroll",
+    "name": "Scroll",
     "native_symbol": "ETH",
     "decimals": 18,
     "threshold_native": 0.0002,
-    "reserve_native": 0.00002
+    "reserve_native": 0.00002,
+    "rpc_url": "https://scroll-mainnet.g.alchemy.com/v2/${ALCHEMY_API_KEY}"
   },
   {
     "key": "blast",
@@ -112,57 +95,8 @@
     "native_symbol": "ETH",
     "decimals": 18,
     "threshold_native": 0.0002,
-    "reserve_native": 0.00002
-  },
-  {
-    "key": "mode",
-    "name": "Mode",
-    "native_symbol": "ETH",
-    "decimals": 18,
-    "threshold_native": 0.0002,
-    "reserve_native": 0.00002
-  },
-  {
-    "key": "worldchain",
-    "name": "World Chain",
-    "native_symbol": "ETH",
-    "decimals": 18,
-    "threshold_native": 0.0002,
-    "reserve_native": 0.00002
-  },
-  {
-    "key": "unichain",
-    "name": "Unichain",
-    "native_symbol": "ETH",
-    "decimals": 18,
-    "threshold_native": 0.0002,
-    "reserve_native": 0.00002
-  },
-  {
-    "key": "zora",
-    "name": "Zora",
-    "native_symbol": "ETH",
-    "decimals": 18,
-    "threshold_native": 0.0002,
-    "reserve_native": 0.00002
-  },
-  {
-    "key": "arbnova",
-    "name": "Arbitrum Nova",
-    "native_symbol": "ETH",
-    "decimals": 18,
-    "threshold_native": 0.0002,
-    "reserve_native": 0.00002
-  },
-
-  // ===== EVM ALTERNATIVES =====
-  {
-    "key": "opbnb",
-    "name": "opBNB",
-    "native_symbol": "BNB",
-    "decimals": 18,
-    "threshold_native": 0.0001,
-    "reserve_native": 0.00005
+    "reserve_native": 0.00002,
+    "rpc_url": "https://blast-mainnet.g.alchemy.com/v2/${ALCHEMY_API_KEY}"
   },
   {
     "key": "mantle",
@@ -170,97 +104,62 @@
     "native_symbol": "MNT",
     "decimals": 18,
     "threshold_native": 0.001,
-    "reserve_native": 0.0002
+    "reserve_native": 0.0002,
+    "rpc_url": "https://mantle-mainnet.g.alchemy.com/v2/${ALCHEMY_API_KEY}"
   },
   {
-    "key": "celo",
-    "name": "Celo",
-    "native_symbol": "CELO",
-    "decimals": 18,
-    "threshold_native": 0.2,
-    "reserve_native": 0.05
-  },
-  {
-    "key": "kava",
-    "name": "Kava EVM",
-    "native_symbol": "KAVA",
-    "decimals": 18,
-    "threshold_native": 0.5,
-    "reserve_native": 0.1
-  },
-  {
-    "key": "core",
-    "name": "Core DAO",
-    "native_symbol": "CORE",
-    "decimals": 18,
-    "threshold_native": 0.2,
-    "reserve_native": 0.05
-  },
-  {
-    "key": "metis",
-    "name": "Metis",
-    "native_symbol": "METIS",
-    "decimals": 18,
-    "threshold_native": 0.02,
-    "reserve_native": 0.005
-  },
-  {
-    "key": "moonbeam",
-    "name": "Moonbeam",
-    "native_symbol": "GLMR",
-    "decimals": 18,
-    "threshold_native": 0.5,
-    "reserve_native": 0.1
-  },
-  {
-    "key": "ronin",
-    "name": "Ronin",
-    "native_symbol": "RON",
-    "decimals": 18,
-    "threshold_native": 0.2,
-    "reserve_native": 0.05
-  },
-  {
-    "key": "sei",
-    "name": "Sei EVM",
-    "native_symbol": "SEI",
-    "decimals": 18,
-    "threshold_native": 0.2,
-    "reserve_native": 0.05
-  },
-  {
-    "key": "zetachain",
-    "name": "ZetaChain",
-    "native_symbol": "ZETA",
-    "decimals": 18,
-    "threshold_native": 0.5,
-    "reserve_native": 0.1
-  },
-  {
-    "key": "soneium",
-    "name": "Soneium",
+    "key": "polygonzkevm",
+    "name": "Polygon zkEVM",
     "native_symbol": "ETH",
     "decimals": 18,
     "threshold_native": 0.0002,
-    "reserve_native": 0.00002
+    "reserve_native": 0.00002,
+    "rpc_url": "https://polygonzkevm-mainnet.g.alchemy.com/v2/${ALCHEMY_API_KEY}"
   },
-
-  // ===== EKSPERIMENTAL / KOMUNITAS =====
   {
     "key": "berachain",
     "name": "Berachain",
     "native_symbol": "BERA",
     "decimals": 18,
     "threshold_native": 0.2,
-    "reserve_native": 0.05
+    "reserve_native": 0.05,
+    "rpc_url": "https://berachain-mainnet.g.alchemy.com/v2/${ALCHEMY_API_KEY}"
   },
   {
-    "key": "apechain",
-    "name": "ApeChain",
-    "native_symbol": "APE",
+    "key": "mode",
+    "name": "Mode",
+    "native_symbol": "ETH",
     "decimals": 18,
-    "threshold_native": 0.2,
-    "reserve_native": 0.05
+    "threshold_native": 0.0002,
+    "reserve_native": 0.00002,
+    "rpc_url": "https://mode-mainnet.g.alchemy.com/v2/${ALCHEMY_API_KEY}"
+  },
+  {
+    "key": "zora",
+    "name": "Zora",
+    "native_symbol": "ETH",
+    "decimals": 18,
+    "threshold_native": 0.0002,
+    "reserve_native": 0.00002,
+    "rpc_url": "https://zora-mainnet.g.alchemy.com/v2/${ALCHEMY_API_KEY}"
+  },
+  {
+    "key": "unichain",
+    "name": "Unichain",
+    "native_symbol": "ETH",
+    "decimals": 18,
+    "threshold_native": 0.0002,
+    "reserve_native": 0.00002,
+    "rpc_url": "https://unichain-mainnet.g.alchemy.com/v2/${ALCHEMY_API_KEY}"
+  },
+  {
+    "key": "worldchain",
+    "name": "World Chain",
+    "native_symbol": "ETH",
+    "decimals": 18,
+    "threshold_native": 0.0002,
+    "reserve_native": 0.00002,
+    "rpc_url": "https://worldchain-mainnet.g.alchemy.com/v2/${ALCHEMY_API_KEY}"
   },
   {
     "key": "frax",
@@ -268,55 +167,8 @@
     "native_symbol": "FRAX",
     "decimals": 18,
     "threshold_native": 0.2,
-    "reserve_native": 0.05
-  },
-  {
-    "key": "bob",
-    "name": "BOB",
-    "native_symbol": "ETH",
-    "decimals": 18,
-    "threshold_native": 0.0002,
-    "reserve_native": 0.00002
-  },
-  {
-    "key": "boba",
-    "name": "Boba Network",
-    "native_symbol": "BOBA",
-    "decimals": 18,
-    "threshold_native": 0.5,
-    "reserve_native": 0.1
-  },
-  {
-    "key": "botanix",
-    "name": "Botanix",
-    "native_symbol": "ETH",
-    "decimals": 18,
-    "threshold_native": 0.0002,
-    "reserve_native": 0.00002
-  },
-  {
-    "key": "shape",
-    "name": "Shape",
-    "native_symbol": "ETH",
-    "decimals": 18,
-    "threshold_native": 0.0002,
-    "reserve_native": 0.00002
-  },
-  {
-    "key": "degen",
-    "name": "Degen Chain",
-    "native_symbol": "DEGEN",
-    "decimals": 18,
-    "threshold_native": 10,
-    "reserve_native": 2
-  },
-  {
-    "key": "hyperliquid",
-    "name": "Hyperliquid",
-    "native_symbol": "HLP",
-    "decimals": 18,
-    "threshold_native": 1,
-    "reserve_native": 0.2
+    "reserve_native": 0.05,
+    "rpc_url": "https://frax-mainnet.g.alchemy.com/v2/${ALCHEMY_API_KEY}"
   },
   {
     "key": "abstract",
@@ -324,7 +176,26 @@
     "native_symbol": "ETH",
     "decimals": 18,
     "threshold_native": 0.0002,
-    "reserve_native": 0.00002
+    "reserve_native": 0.00002,
+    "rpc_url": "https://abstract-mainnet.g.alchemy.com/v2/${ALCHEMY_API_KEY}"
+  },
+  {
+    "key": "apechain",
+    "name": "ApeChain",
+    "native_symbol": "APE",
+    "decimals": 18,
+    "threshold_native": 0.2,
+    "reserve_native": 0.05,
+    "rpc_url": "https://apechain-mainnet.g.alchemy.com/v2/${ALCHEMY_API_KEY}"
+  },
+  {
+    "key": "arbnova",
+    "name": "Arb Nova",
+    "native_symbol": "ETH",
+    "decimals": 18,
+    "threshold_native": 0.0002,
+    "reserve_native": 0.00002,
+    "rpc_url": "https://arbnova-mainnet.g.alchemy.com/v2/${ALCHEMY_API_KEY}"
   },
   {
     "key": "astar",
@@ -332,7 +203,8 @@
     "native_symbol": "ASTR",
     "decimals": 18,
     "threshold_native": 0.5,
-    "reserve_native": 0.1
+    "reserve_native": 0.1,
+    "rpc_url": "https://astar-mainnet.g.alchemy.com/v2/${ALCHEMY_API_KEY}"
   },
   {
     "key": "aurora",
@@ -340,6 +212,169 @@
     "native_symbol": "AURORA",
     "decimals": 18,
     "threshold_native": 0.5,
-    "reserve_native": 0.1
+    "reserve_native": 0.1,
+    "rpc_url": "https://aurora-mainnet.g.alchemy.com/v2/${ALCHEMY_API_KEY}"
+  },
+  {
+    "key": "bob",
+    "name": "BOB",
+    "native_symbol": "ETH",
+    "decimals": 18,
+    "threshold_native": 0.0002,
+    "reserve_native": 0.00002,
+    "rpc_url": "https://bob-mainnet.g.alchemy.com/v2/${ALCHEMY_API_KEY}"
+  },
+  {
+    "key": "boba",
+    "name": "Boba Network",
+    "native_symbol": "BOBA",
+    "decimals": 18,
+    "threshold_native": 0.5,
+    "reserve_native": 0.1,
+    "rpc_url": "https://boba-mainnet.g.alchemy.com/v2/${ALCHEMY_API_KEY}"
+  },
+  {
+    "key": "botanix",
+    "name": "Botanix",
+    "native_symbol": "ETH",
+    "decimals": 18,
+    "threshold_native": 0.0002,
+    "reserve_native": 0.00002,
+    "rpc_url": "https://botanix-mainnet.g.alchemy.com/v2/${ALCHEMY_API_KEY}"
+  },
+  {
+    "key": "celo",
+    "name": "Celo",
+    "native_symbol": "CELO",
+    "decimals": 18,
+    "threshold_native": 0.2,
+    "reserve_native": 0.05,
+    "rpc_url": "https://celo-mainnet.g.alchemy.com/v2/${ALCHEMY_API_KEY}"
+  },
+  {
+    "key": "core",
+    "name": "Core",
+    "native_symbol": "CORE",
+    "decimals": 18,
+    "threshold_native": 0.2,
+    "reserve_native": 0.05,
+    "rpc_url": "https://core-mainnet.g.alchemy.com/v2/${ALCHEMY_API_KEY}"
+  },
+  {
+    "key": "cronos",
+    "name": "Cronos",
+    "native_symbol": "CRO",
+    "decimals": 18,
+    "threshold_native": 0.5,
+    "reserve_native": 0.1,
+    "rpc_url": "https://cronos-mainnet.g.alchemy.com/v2/${ALCHEMY_API_KEY}"
+  },
+  {
+    "key": "degen",
+    "name": "Degen Chain",
+    "native_symbol": "DEGEN",
+    "decimals": 18,
+    "threshold_native": 10,
+    "reserve_native": 2,
+    "rpc_url": "https://degen-mainnet.g.alchemy.com/v2/${ALCHEMY_API_KEY}"
+  },
+  {
+    "key": "fantom",
+    "name": "Fantom",
+    "native_symbol": "FTM",
+    "decimals": 18,
+    "threshold_native": 0.5,
+    "reserve_native": 0.1,
+    "rpc_url": "https://fantom-mainnet.g.alchemy.com/v2/${ALCHEMY_API_KEY}"
+  },
+  {
+    "key": "gnosis",
+    "name": "Gnosis Chain",
+    "native_symbol": "xDAI",
+    "decimals": 18,
+    "threshold_native": 0.5,
+    "reserve_native": 0.1,
+    "rpc_url": "https://gnosis-mainnet.g.alchemy.com/v2/${ALCHEMY_API_KEY}"
+  },
+  {
+    "key": "hyperliquid",
+    "name": "Hyperliquid",
+    "native_symbol": "HLP",
+    "decimals": 18,
+    "threshold_native": 1,
+    "reserve_native": 0.2,
+    "rpc_url": "https://hyperliquid-mainnet.g.alchemy.com/v2/${ALCHEMY_API_KEY}"
+  },
+  {
+    "key": "kava",
+    "name": "Kava",
+    "native_symbol": "KAVA",
+    "decimals": 18,
+    "threshold_native": 0.5,
+    "reserve_native": 0.1,
+    "rpc_url": "https://kava-mainnet.g.alchemy.com/v2/${ALCHEMY_API_KEY}"
+  },
+  {
+    "key": "metis",
+    "name": "Metis",
+    "native_symbol": "METIS",
+    "decimals": 18,
+    "threshold_native": 0.02,
+    "reserve_native": 0.005,
+    "rpc_url": "https://metis-mainnet.g.alchemy.com/v2/${ALCHEMY_API_KEY}"
+  },
+  {
+    "key": "moonbeam",
+    "name": "Moonbeam",
+    "native_symbol": "GLMR",
+    "decimals": 18,
+    "threshold_native": 0.5,
+    "reserve_native": 0.1,
+    "rpc_url": "https://moonbeam-mainnet.g.alchemy.com/v2/${ALCHEMY_API_KEY}"
+  },
+  {
+    "key": "ronin",
+    "name": "Ronin",
+    "native_symbol": "RON",
+    "decimals": 18,
+    "threshold_native": 0.2,
+    "reserve_native": 0.05,
+    "rpc_url": "https://ronin-mainnet.g.alchemy.com/v2/${ALCHEMY_API_KEY}"
+  },
+  {
+    "key": "sei",
+    "name": "Sei",
+    "native_symbol": "SEI",
+    "decimals": 18,
+    "threshold_native": 0.2,
+    "reserve_native": 0.05,
+    "rpc_url": "https://sei-mainnet.g.alchemy.com/v2/${ALCHEMY_API_KEY}"
+  },
+  {
+    "key": "shape",
+    "name": "Shape",
+    "native_symbol": "ETH",
+    "decimals": 18,
+    "threshold_native": 0.0002,
+    "reserve_native": 0.00002,
+    "rpc_url": "https://shape-mainnet.g.alchemy.com/v2/${ALCHEMY_API_KEY}"
+  },
+  {
+    "key": "zetachain",
+    "name": "ZetaChain",
+    "native_symbol": "ZETA",
+    "decimals": 18,
+    "threshold_native": 0.5,
+    "reserve_native": 0.1,
+    "rpc_url": "https://zetachain-mainnet.g.alchemy.com/v2/${ALCHEMY_API_KEY}"
+  },
+  {
+    "key": "soneium",
+    "name": "Soneium",
+    "native_symbol": "ETH",
+    "decimals": 18,
+    "threshold_native": 0.0002,
+    "reserve_native": 0.00002,
+    "rpc_url": "https://soneium-mainnet.g.alchemy.com/v2/${ALCHEMY_API_KEY}"
   }
 ]
