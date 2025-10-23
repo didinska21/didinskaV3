@@ -1,0 +1,345 @@
+[
+  // ===== MAINNETS =====
+  {
+    "key": "ethereum",
+    "name": "Ethereum Mainnet",
+    "native_symbol": "ETH",
+    "decimals": 18,
+    "threshold_native": 0.0002,
+    "reserve_native": 0.00002
+  },
+  {
+    "key": "bsc",
+    "name": "BNB Smart Chain",
+    "native_symbol": "BNB",
+    "decimals": 18,
+    "threshold_native": 0.0001,
+    "reserve_native": 0.0001
+  },
+  {
+    "key": "polygon",
+    "name": "Polygon",
+    "native_symbol": "MATIC",
+    "decimals": 18,
+    "threshold_native": 0.20,
+    "reserve_native": 0.05
+  },
+  {
+    "key": "avax",
+    "name": "Avalanche C-Chain",
+    "native_symbol": "AVAX",
+    "decimals": 18,
+    "threshold_native": 0.002,
+    "reserve_native": 0.0005
+  },
+  {
+    "key": "fantom",
+    "name": "Fantom",
+    "native_symbol": "FTM",
+    "decimals": 18,
+    "threshold_native": 0.5,
+    "reserve_native": 0.1
+  },
+  {
+    "key": "cronos",
+    "name": "Cronos",
+    "native_symbol": "CRO",
+    "decimals": 18,
+    "threshold_native": 0.5,
+    "reserve_native": 0.1
+  },
+  {
+    "key": "gnosis",
+    "name": "Gnosis Chain",
+    "native_symbol": "xDAI",
+    "decimals": 18,
+    "threshold_native": 0.5,
+    "reserve_native": 0.1
+  },
+
+  // ===== ETH LAYER-2 =====
+  {
+    "key": "arbitrum",
+    "name": "Arbitrum One",
+    "native_symbol": "ETH",
+    "decimals": 18,
+    "threshold_native": 0.0002,
+    "reserve_native": 0.00002
+  },
+  {
+    "key": "optimism",
+    "name": "Optimism",
+    "native_symbol": "ETH",
+    "decimals": 18,
+    "threshold_native": 0.0002,
+    "reserve_native": 0.00002
+  },
+  {
+    "key": "base",
+    "name": "Base",
+    "native_symbol": "ETH",
+    "decimals": 18,
+    "threshold_native": 0.0002,
+    "reserve_native": 0.00002
+  },
+  {
+    "key": "scroll",
+    "name": "Scroll",
+    "native_symbol": "ETH",
+    "decimals": 18,
+    "threshold_native": 0.0002,
+    "reserve_native": 0.00002
+  },
+  {
+    "key": "linea",
+    "name": "Linea",
+    "native_symbol": "ETH",
+    "decimals": 18,
+    "threshold_native": 0.0002,
+    "reserve_native": 0.00002
+  },
+  {
+    "key": "polygonzkevm",
+    "name": "Polygon zkEVM",
+    "native_symbol": "ETH",
+    "decimals": 18,
+    "threshold_native": 0.0002,
+    "reserve_native": 0.00002
+  },
+  {
+    "key": "blast",
+    "name": "Blast",
+    "native_symbol": "ETH",
+    "decimals": 18,
+    "threshold_native": 0.0002,
+    "reserve_native": 0.00002
+  },
+  {
+    "key": "mode",
+    "name": "Mode",
+    "native_symbol": "ETH",
+    "decimals": 18,
+    "threshold_native": 0.0002,
+    "reserve_native": 0.00002
+  },
+  {
+    "key": "worldchain",
+    "name": "World Chain",
+    "native_symbol": "ETH",
+    "decimals": 18,
+    "threshold_native": 0.0002,
+    "reserve_native": 0.00002
+  },
+  {
+    "key": "unichain",
+    "name": "Unichain",
+    "native_symbol": "ETH",
+    "decimals": 18,
+    "threshold_native": 0.0002,
+    "reserve_native": 0.00002
+  },
+  {
+    "key": "zora",
+    "name": "Zora",
+    "native_symbol": "ETH",
+    "decimals": 18,
+    "threshold_native": 0.0002,
+    "reserve_native": 0.00002
+  },
+  {
+    "key": "arbnova",
+    "name": "Arbitrum Nova",
+    "native_symbol": "ETH",
+    "decimals": 18,
+    "threshold_native": 0.0002,
+    "reserve_native": 0.00002
+  },
+
+  // ===== EVM ALTERNATIVES =====
+  {
+    "key": "opbnb",
+    "name": "opBNB",
+    "native_symbol": "BNB",
+    "decimals": 18,
+    "threshold_native": 0.0001,
+    "reserve_native": 0.00005
+  },
+  {
+    "key": "mantle",
+    "name": "Mantle",
+    "native_symbol": "MNT",
+    "decimals": 18,
+    "threshold_native": 0.001,
+    "reserve_native": 0.0002
+  },
+  {
+    "key": "celo",
+    "name": "Celo",
+    "native_symbol": "CELO",
+    "decimals": 18,
+    "threshold_native": 0.2,
+    "reserve_native": 0.05
+  },
+  {
+    "key": "kava",
+    "name": "Kava EVM",
+    "native_symbol": "KAVA",
+    "decimals": 18,
+    "threshold_native": 0.5,
+    "reserve_native": 0.1
+  },
+  {
+    "key": "core",
+    "name": "Core DAO",
+    "native_symbol": "CORE",
+    "decimals": 18,
+    "threshold_native": 0.2,
+    "reserve_native": 0.05
+  },
+  {
+    "key": "metis",
+    "name": "Metis",
+    "native_symbol": "METIS",
+    "decimals": 18,
+    "threshold_native": 0.02,
+    "reserve_native": 0.005
+  },
+  {
+    "key": "moonbeam",
+    "name": "Moonbeam",
+    "native_symbol": "GLMR",
+    "decimals": 18,
+    "threshold_native": 0.5,
+    "reserve_native": 0.1
+  },
+  {
+    "key": "ronin",
+    "name": "Ronin",
+    "native_symbol": "RON",
+    "decimals": 18,
+    "threshold_native": 0.2,
+    "reserve_native": 0.05
+  },
+  {
+    "key": "sei",
+    "name": "Sei EVM",
+    "native_symbol": "SEI",
+    "decimals": 18,
+    "threshold_native": 0.2,
+    "reserve_native": 0.05
+  },
+  {
+    "key": "zetachain",
+    "name": "ZetaChain",
+    "native_symbol": "ZETA",
+    "decimals": 18,
+    "threshold_native": 0.5,
+    "reserve_native": 0.1
+  },
+  {
+    "key": "soneium",
+    "name": "Soneium",
+    "native_symbol": "ETH",
+    "decimals": 18,
+    "threshold_native": 0.0002,
+    "reserve_native": 0.00002
+  },
+
+  // ===== EKSPERIMENTAL / KOMUNITAS =====
+  {
+    "key": "berachain",
+    "name": "Berachain",
+    "native_symbol": "BERA",
+    "decimals": 18,
+    "threshold_native": 0.2,
+    "reserve_native": 0.05
+  },
+  {
+    "key": "apechain",
+    "name": "ApeChain",
+    "native_symbol": "APE",
+    "decimals": 18,
+    "threshold_native": 0.2,
+    "reserve_native": 0.05
+  },
+  {
+    "key": "frax",
+    "name": "Frax",
+    "native_symbol": "FRAX",
+    "decimals": 18,
+    "threshold_native": 0.2,
+    "reserve_native": 0.05
+  },
+  {
+    "key": "bob",
+    "name": "BOB",
+    "native_symbol": "ETH",
+    "decimals": 18,
+    "threshold_native": 0.0002,
+    "reserve_native": 0.00002
+  },
+  {
+    "key": "boba",
+    "name": "Boba Network",
+    "native_symbol": "BOBA",
+    "decimals": 18,
+    "threshold_native": 0.5,
+    "reserve_native": 0.1
+  },
+  {
+    "key": "botanix",
+    "name": "Botanix",
+    "native_symbol": "ETH",
+    "decimals": 18,
+    "threshold_native": 0.0002,
+    "reserve_native": 0.00002
+  },
+  {
+    "key": "shape",
+    "name": "Shape",
+    "native_symbol": "ETH",
+    "decimals": 18,
+    "threshold_native": 0.0002,
+    "reserve_native": 0.00002
+  },
+  {
+    "key": "degen",
+    "name": "Degen Chain",
+    "native_symbol": "DEGEN",
+    "decimals": 18,
+    "threshold_native": 10,
+    "reserve_native": 2
+  },
+  {
+    "key": "hyperliquid",
+    "name": "Hyperliquid",
+    "native_symbol": "HLP",
+    "decimals": 18,
+    "threshold_native": 1,
+    "reserve_native": 0.2
+  },
+  {
+    "key": "abstract",
+    "name": "Abstract",
+    "native_symbol": "ETH",
+    "decimals": 18,
+    "threshold_native": 0.0002,
+    "reserve_native": 0.00002
+  },
+  {
+    "key": "astar",
+    "name": "Astar",
+    "native_symbol": "ASTR",
+    "decimals": 18,
+    "threshold_native": 0.5,
+    "reserve_native": 0.1
+  },
+  {
+    "key": "aurora",
+    "name": "Aurora",
+    "native_symbol": "AURORA",
+    "decimals": 18,
+    "threshold_native": 0.5,
+    "reserve_native": 0.1
+  }
+]
