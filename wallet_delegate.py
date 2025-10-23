@@ -1,627 +1,450 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-wallet_delegate.py - Auto-Forward Native Coin (A -> B)
-Fitur:
-- Set wallet penampung (B)
-- Tambah / daftar / hapus wallet delegate (A -> B)
-- Monitor otomatis (polling) & sweep sekali jalan (one-shot)
-- Notifikasi Telegram (opsional)
-Semua teks & menu dalam Bahasa Indonesia.
+wallet_delegate.py - Smart-Contract based Delegate Wallet (Menu 3)
+- Deploy kontrak auto-forwarder (DelegateWallet)
+- Kelola sink, pause/unpause, sweep
+- Simpan konfigurasi di delegate_rules.json
 """
-
-import os
-import sys
-import json
-import time
-import uuid
-from decimal import Decimal
+import os, sys, json, time
 from datetime import datetime
+from getpass import getpass
+
 from dotenv import load_dotenv
+from eth_account import Account
+from web3 import Web3, HTTPProvider
+from web3.middleware import geth_poa_middleware
 
-# Tambahkan utils ke sys.path
+# Tambah utils ke path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'utils'))
-
 from colors import Colors
-from ui import (
-    print_box, print_loader, print_progress_bar, print_stats_box,
-    print_section_header, print_success, print_warning, print_error, ask_confirmation
-)
-from checker import build_web3_clients, check_native_balance
-from telegram import (
-    is_telegram_enabled, notify_error, send_message
-)
-
-try:
-    from web3 import Web3, HTTPProvider
-    WEB3_AVAILABLE = True
-except Exception:
-    WEB3_AVAILABLE = False
-    Web3 = None
-    HTTPProvider = None
+from ui import print_box, print_loader, print_progress_bar, print_stats_box, print_section_header, print_warning, print_error, print_success
 
 load_dotenv()
 
-# ---- File Konfigurasi / Data ----
-CONFIG_FILE = os.getenv("CONFIG_FILE", "config.json")
-CHAIN_LIST_FILE = os.path.join("utils", "chain.json")       # daftar chain yang dipantau
-DELEGATIONS_FILE = "delegations.json"                        # aturan delegasi (A -> B)
-DELEGATE_SETTINGS_FILE = "delegate_settings.json"            # pengaturan global modul delegate
-DEFAULT_INTERVAL_SEC = 12
+# ---------- Konstanta & File ----------
+CONFIG_FILE   = os.getenv("CONFIG_FILE", "config.json")
+CHAIN_FILE    = os.path.join("utils", "chain.json")  # daftar chain (RPC + chainId + simbol)
+RULES_FILE    = "delegate_rules.json"               # simpan daftar kontrak delegate
 
-# ---- Notifikasi Telegram ----
-TELEGRAM_ON = is_telegram_enabled()
+# ---------- Kontrak Solidity (inline) ----------
+SOL_SOURCE = r"""
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.24;
 
-# ---- Util I/O JSON ----
-def _load_json(path, default):
+contract DelegateWallet {
+    event SinkUpdated(address indexed oldSink, address indexed newSink);
+    event Paused(address indexed by, bool paused);
+    event Forwarded(address indexed to, uint256 amount);
+    event Received(address indexed from, uint256 amount);
+
+    address public owner;
+    address public sink;
+    bool    public paused;
+    uint256 private _guard;
+
+    modifier onlyOwner() {
+        require(msg.sender == owner, "Not owner");
+        _;
+    }
+    modifier nonReentrant() {
+        require(_guard == 0, "Reentrancy");
+        _guard = 1;
+        _;
+        _guard = 0;
+    }
+    modifier notPaused() {
+        require(!paused, "Paused");
+        _;
+    }
+    constructor(address _sink) {
+        require(_sink != address(0), "Invalid sink");
+        owner = msg.sender;
+        sink = _sink;
+        _guard = 0;
+    }
+    function setSink(address _sink) external onlyOwner {
+        require(_sink != address(0), "Invalid sink");
+        address old = sink;
+        sink = _sink;
+        emit SinkUpdated(old, _sink);
+    }
+    function setPaused(bool _paused) external onlyOwner {
+        paused = _paused;
+        emit Paused(msg.sender, _paused);
+    }
+    function sweep() public nonReentrant {
+        uint256 bal = address(this).balance;
+        if (bal == 0) return;
+        (bool ok, ) = payable(sink).call{value: bal}("");
+        require(ok, "Forward failed");
+        emit Forwarded(sink, bal);
+    }
+    function sweepToken(address token) external onlyOwner nonReentrant {
+        (bool s1, bytes memory d1) = token.staticcall(abi.encodeWithSignature("balanceOf(address)", address(this)));
+        require(s1 && d1.length >= 32, "balanceOf fail");
+        uint256 bal = abi.decode(d1, (uint256));
+        if (bal == 0) return;
+        (bool s2, ) = token.call(abi.encodeWithSignature("transfer(address,uint256)", sink, bal));
+        require(s2, "transfer fail");
+    }
+    receive() external payable notPaused nonReentrant {
+        emit Received(msg.sender, msg.value);
+        uint256 bal = address(this).balance;
+        if (bal == 0) return;
+        (bool ok, ) = payable(sink).call{value: bal}("");
+        require(ok, "Forward failed");
+        emit Forwarded(sink, bal);
+    }
+    fallback() external payable notPaused nonReentrant {
+        if (msg.value > 0) {
+            emit Received(msg.sender, msg.value);
+            uint256 bal = address(this).balance;
+            (bool ok, ) = payable(sink).call{value: bal}("");
+            require(ok, "Forward failed");
+            emit Forwarded(sink, bal);
+        }
+    }
+}
+"""
+
+# compile on the fly (py-solc-x)
+def compile_contract():
     try:
-        if not os.path.exists(path):
-            return default
+        from solcx import compile_standard, install_solc, set_solc_version
+    except Exception:
+        print_error("py-solc-x belum terpasang. Jalankan: pip install py-solc-x")
+        return None, None
+
+    try:
+        # Pastikan versi compiler ada
+        install_solc("0.8.24")
+        set_solc_version("0.8.24")
+
+        source_json = {
+            "language": "Solidity",
+            "sources": {"DelegateWallet.sol": {"content": SOL_SOURCE}},
+            "settings": {
+                "optimizer": {"enabled": True, "runs": 200},
+                "outputSelection": {"*": {"*": ["abi", "evm.bytecode"]}}
+            },
+        }
+        compiled = compile_standard(source_json)
+        contract = compiled["contracts"]["DelegateWallet.sol"]["DelegateWallet"]
+        abi = contract["abi"]
+        bytecode = contract["evm"]["bytecode"]["object"]
+        return abi, bytecode
+    except Exception as e:
+        print_error(f"Gagal compile: {e}")
+        return None, None
+
+# ---------- Helpers ----------
+def load_json(path, default):
+    if not os.path.exists(path):
+        return default
+    try:
         with open(path, "r", encoding="utf-8") as f:
             return json.load(f)
-    except Exception:
+    except:
         return default
 
-def _save_json(path, data):
+def save_json(path, data):
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2, ensure_ascii=False)
+
+def connect_chain(chain_key):
+    chains = load_json(CHAIN_FILE, {})
+    info = chains.get(chain_key)
+    if not info:
+        print_error(f"Chain '{chain_key}' tidak ditemukan di utils/chain.json")
+        return None, None
+
+    rpc = info.get("rpc_url")
+    if not rpc:
+        print_error("RPC URL kosong")
+        return None, None
+
+    # inject ALCHEMY_API_KEY jika ada placeholder
+    alchemy = os.getenv("ALCHEMY_API_KEY")
+    if "${ALCHEMY_API_KEY}" in rpc and alchemy:
+        rpc = rpc.replace("${ALCHEMY_API_KEY}", alchemy)
+
+    w3 = Web3(HTTPProvider(rpc, request_kwargs={"timeout": 15}))
+    # POA chains (sebagian L2) kadang butuh middleware ini
     try:
-        with open(path, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=2, ensure_ascii=False)
-        return True
-    except Exception as e:
-        print_error(f"Gagal menyimpan {path}: {e}")
-        return False
+        w3.middleware_onion.inject(geth_poa_middleware, layer=0)
+    except Exception:
+        pass
 
-# ---- Chain Data ----
-def load_chain_list():
-    """
-    Memuat daftar chain yang akan dipantau dari utils/chain.json
-    Format setiap item:
-    {
-      "key": "ethereum",
-      "name": "Ethereum Mainnet",
-      "native_symbol": "ETH",
-      "decimals": 18,
-      "threshold_native": 0.0005,
-      "reserve_native": 0.00002
-    }
-    """
-    data = _load_json(CHAIN_LIST_FILE, default=[])
-    # validasi dasar
-    valid = []
-    for it in data:
-        if isinstance(it, dict) and it.get("key") and it.get("native_symbol"):
-            valid.append(it)
-    return valid
+    if not w3.is_connected():
+        print_error("Gagal konek RPC")
+        return None, None
 
-def chain_defaults_map():
-    """
-    Menghasilkan map: chain_key -> {native_symbol, decimals, threshold_native, reserve_native, name}
-    """
-    out = {}
-    for it in load_chain_list():
-        out[it["key"]] = {
-            "name": it.get("name", it["key"]),
-            "native_symbol": it.get("native_symbol", "ETH"),
-            "decimals": int(it.get("decimals", 18)),
-            "threshold_native": float(it.get("threshold_native", 0.0)),
-            "reserve_native": float(it.get("reserve_native", 0.0)),
-        }
-    return out
+    chain_id = info.get("chain_id")
+    if not chain_id:
+        # fallback baca dari node
+        try:
+            chain_id = w3.eth.chain_id
+        except:
+            chain_id = None
 
-# ---- Data Aturan (delegations.json) ----
-def load_delegations():
-    """
-    Struktur:
-    {
-      "sink_address": "0xB....",          # penampung global
-      "rules": [
-        {
-          "id": "uuid",
-          "owner_pk": "0x....",           # private key hex dari Wallet A
-          "owner_address": "0xA....",
-          "chains": ["ethereum","bsc"],
-          "enabled": true,
-          "created_at": "2025-10-23T..."
-        }
-      ]
-    }
-    """
-    return _load_json(DELEGATIONS_FILE, default={"sink_address": "", "rules": []})
+    return w3, chain_id
 
-def save_delegations(data):
-    return _save_json(DELEGATIONS_FILE, data)
+def prompt_pk():
+    pk = getpass(f"{Colors.YELLOW}Masukkan Private Key (tidak ditampilkan): {Colors.ENDC}")
+    pk = pk.strip().replace("0x","")
+    if len(pk) != 64:
+        print_error("Private key tidak valid.")
+        return None
+    return "0x"+pk
 
-# ---- Settings Global Delegate (delegate_settings.json) ----
-def load_delegate_settings():
-    """
-    Settings global (bisa dikembangkan sewaktu-waktu):
-    {
-      "interval_sec": 12,
-      "gas_caps": { "maxFeePerGasGwei": null, "maxPriorityFeePerGasGwei": null }
-    }
-    """
-    return _load_json(DELEGATE_SETTINGS_FILE, default={
-        "interval_sec": DEFAULT_INTERVAL_SEC,
-        "gas_caps": {
-            "maxFeePerGasGwei": None,
-            "maxPriorityFeePerGasGwei": None
-        }
+def checksum(w3, addr):
+    try:
+        return w3.to_checksum_address(addr)
+    except:
+        return addr
+
+# ---------- Aksi Kontrak ----------
+def deploy_delegate(chain_key, sink_addr):
+    abi, bytecode = compile_contract()
+    if not abi or not bytecode:
+        return
+
+    w3, chain_id = connect_chain(chain_key)
+    if not w3:
+        return
+
+    sink = checksum(w3, sink_addr)
+    pk = prompt_pk()
+    if not pk:
+        return
+
+    acct = Account.from_key(pk)
+    nonce = w3.eth.get_transaction_count(acct.address)
+
+    contract = w3.eth.contract(abi=abi, bytecode=bytecode)
+    tx = contract.constructor(sink).build_transaction({
+        "from": acct.address,
+        "nonce": nonce,
+        "chainId": chain_id,
+        "gas": 700000,  # konservatif
+        "maxFeePerGas": w3.eth.gas_price * 2 // 1 if hasattr(w3.eth, 'gas_price') else w3.to_wei(2, 'gwei'),
+        "maxPriorityFeePerGas": w3.to_wei(1, 'gwei'),
     })
 
-def save_delegate_settings(data):
-    return _save_json(DELEGATE_SETTINGS_FILE, data)
-
-# ---- Helper Validasi ----
-def checksum_or_none(addr):
-    try:
-        return Web3.to_checksum_address(addr) if WEB3_AVAILABLE else addr
-    except Exception:
-        return None
-
-def pk_to_address(pk_hex):
-    try:
-        acct = Web3().eth.account.from_key(pk_hex)
-        return acct.address
-    except Exception:
-        return None
-
-# ---- Gas & Sweep ----
-def _wei_to_native(wei, decimals=18):
-    return float(Decimal(wei) / Decimal(10 ** decimals))
-
-def _native_to_wei(amount, decimals=18):
-    return int(Decimal(str(amount)) * Decimal(10 ** decimals))
-
-def _get_gas_params(w3, gas_caps=None):
-    """
-    Mengambil parameter gas.
-    - Coba EIP-1559 (baseFee+priority). Jika tidak tersedia, fallback ke gas_price legacy.
-    - gas_caps opsional (batasi max fee/priority).
-    Return dict {type: "eip1559"|"legacy", gasPrice or maxFeePerGas/maxPriorityFeePerGas}
-    """
-    try:
-        latest = w3.eth.get_block("latest")
-        base_fee = latest.get("baseFeePerGas")
-    except Exception:
-        base_fee = None
-
-    if base_fee is not None:
-        # EIP-1559
-        # priority default konservatif
-        priority = w3.to_wei(1, "gwei")
-        if gas_caps:
-            mp = gas_caps.get("maxPriorityFeePerGasGwei")
-            if mp is not None:
-                priority = w3.to_wei(mp, "gwei")
-        # max fee
-        max_fee = base_fee + priority
-        if gas_caps:
-            mf = gas_caps.get("maxFeePerGasGwei")
-            if mf is not None:
-                max_fee = min(max_fee, w3.to_wei(mf, "gwei"))
-        return {"type": "eip1559", "maxFeePerGas": int(max_fee), "maxPriorityFeePerGas": int(priority)}
-    else:
-        # Legacy
-        gas_price = w3.eth.gas_price
-        if gas_caps and gas_caps.get("maxFeePerGasGwei") is not None:
-            cap = w3.to_wei(gas_caps["maxFeePerGasGwei"], "gwei")
-            gas_price = min(gas_price, cap)
-        return {"type": "legacy", "gasPrice": int(gas_price)}
-
-def _estimate_gas_limit(w3, from_addr, to_addr, value_wei):
-    """
-    Estimasi gas limit untuk transfer native.
-    Fallback ke 21000 jika estimate gagal.
-    """
-    try:
-        return w3.eth.estimate_gas({
-            "from": from_addr,
-            "to": to_addr,
-            "value": int(value_wei)
-        })
-    except Exception:
-        return 21000
-
-def _build_and_send_tx(w3, pk_hex, to_addr, value_wei, gas_params):
-    acct = w3.eth.account.from_key(pk_hex)
-    from_addr = acct.address
-    nonce = w3.eth.get_transaction_count(from_addr)
-
-    tx = {
-        "from": from_addr,
-        "to": to_addr,
-        "value": int(value_wei),
-        "nonce": nonce,
-        "chainId": w3.eth.chain_id,
-    }
-
-    # gas limit (estimate menggunakan nilai kira-kira, disesuaikan di bawah)
-    gas_limit = _estimate_gas_limit(w3, from_addr, to_addr, value_wei)
-    tx["gas"] = int(gas_limit)
-
-    # set gas params
-    if gas_params.get("type") == "eip1559":
-        tx["maxFeePerGas"] = gas_params["maxFeePerGas"]
-        tx["maxPriorityFeePerGas"] = gas_params["maxPriorityFeePerGas"]
-    else:
-        tx["gasPrice"] = gas_params["gasPrice"]
-
-    # tanda tangan & kirim
-    signed = w3.eth.account.sign_transaction(tx, private_key=pk_hex)
+    signed = acct.sign_transaction(tx)
     tx_hash = w3.eth.send_raw_transaction(signed.rawTransaction)
-    return tx_hash.hex()
+    print_info(f"Tx deploy terkirim: {tx_hash.hex()}")
 
-def _sweep_native_on_chain(w3, chain_key, pk_hex, to_addr, defaults, gas_caps=None):
-    """
-    Logika utamanya:
-    - Cek saldo native A
-    - Ambil gas params + gas_limit
-    - Hitung biaya total gas
-    - Kirim amount = balance - gas_cost - reserve (kalau masih >= threshold)
-    """
-    info = defaults.get(chain_key) or {}
-    native_symbol = info.get("native_symbol", "ETH")
-    decimals = int(info.get("decimals", 18))
-    threshold = float(info.get("threshold_native", 0.0))
-    reserve = float(info.get("reserve_native", 0.0))
-
-    acct = Web3().eth.account.from_key(pk_hex)
-    owner = acct.address
-    w3 = w3  # alias
-
-    # saldo dalam native
-    bal_wei = w3.eth.get_balance(owner)
-    bal_native = _wei_to_native(bal_wei, decimals=decimals)
-
-    if bal_native <= 0:
-        return None, f"Saldo 0 {native_symbol}"
-
-    gas_params = _get_gas_params(w3, gas_caps=gas_caps)
-
-    # Tentukan gas_limit kira-kira untuk hitung biaya kasarnya
-    gas_limit = _estimate_gas_limit(w3, owner, to_addr, 1)
-    if gas_params["type"] == "eip1559":
-        gas_cost_wei = gas_limit * gas_params["maxFeePerGas"]
-    else:
-        gas_cost_wei = gas_limit * gas_params["gasPrice"]
-    gas_cost_native = _wei_to_native(gas_cost_wei, decimals=decimals)
-
-    # Hitung amount kirim
-    amount_native = bal_native - gas_cost_native - reserve
-    if amount_native <= 0 or amount_native < threshold:
-        return None, f"Gagal sweep: saldo {bal_native:.8f} {native_symbol} < (biaya gas {gas_cost_native:.8f} + reserve {reserve:.8f} + threshold {threshold:.8f})"
-
-    value_wei = _native_to_wei(amount_native, decimals=decimals)
-    # build & kirim
-    try:
-        tx_hash = _build_and_send_tx(w3, pk_hex, to_addr, value_wei, gas_params)
-        return tx_hash, None
-    except Exception as e:
-        return None, f"TX gagal: {e}"
-
-# ---- Menu Aksi ----
-def set_wallet_penampung():
-    data = load_delegations()
-    print_section_header("SET WALLET PENAMPUNG (B)")
-    addr = input(f"{Colors.YELLOW}Masukkan address penampung (B): {Colors.ENDC}").strip()
-    cs = checksum_or_none(addr)
-    if not cs:
-        print_error("Alamat tidak valid.")
-        return
-    data["sink_address"] = cs
-    if save_delegations(data):
-        print_success(f"Wallet penampung diset ke: {cs}")
-        if TELEGRAM_ON:
-            send_message(f"📥 Penampung diupdate:\n<code>{cs}</code>")
-    else:
-        print_error("Gagal menyimpan pengaturan penampung.")
-
-def tambah_wallet_delegate():
-    print_section_header("TAMBAH WALLET DELEGATE (A → B)")
-    data = load_delegations()
-    defaults = chain_defaults_map()
-
-    sink = data.get("sink_address") or ""
-    if not sink:
-        print_warning("Wallet penampung (B) belum diset. Set terlebih dahulu.")
+    print_loader("Menunggu konfirmasi", 2)
+    receipt = w3.eth.wait_for_transaction_receipt(tx_hash)
+    if receipt.status != 1:
+        print_error("Deploy gagal (status=0)")
         return
 
-    pk = input(f"{Colors.YELLOW}Masukkan private key Wallet A (0x...): {Colors.ENDC}").strip()
-    if not pk.startswith("0x") or len(pk) != 66:
-        print_error("Private key harus hex 0x + 64 karakter.")
-        return
+    addr = receipt.contractAddress
+    print_success(f"DelegateWallet ter-deploy di: {addr}")
 
-    owner_addr = pk_to_address(pk)
-    if not owner_addr:
-        print_error("Private key tidak valid.")
-        return
-
-    # Pilih chain
-    chain_items = list(defaults.keys())
-    print_box("DAFTAR CHAIN TERSEDIA", [f"- {k} ({defaults[k]['native_symbol']})" for k in chain_items], Colors.CYAN)
-    chain_input = input(f"{Colors.YELLOW}Ketik chain (pisahkan koma) atau 'all' untuk semua: {Colors.ENDC}").strip().lower()
-    if chain_input == "all":
-        chains = chain_items
-    else:
-        chains = [c.strip() for c in chain_input.split(",") if c.strip() in chain_items]
-        if not chains:
-            print_error("Tidak ada chain valid yang dipilih.")
-            return
-
-    rule = {
-        "id": str(uuid.uuid4()),
-        "owner_pk": pk,
-        "owner_address": Web3.to_checksum_address(owner_addr),
-        "chains": chains,
-        "enabled": True,
+    # simpan ke RULES_FILE
+    rules = load_json(RULES_FILE, {})
+    rules.setdefault(chain_key, [])
+    rules[chain_key].append({
+        "contract": addr,
+        "sink": sink,
+        "owner": acct.address,
         "created_at": datetime.now().isoformat()
-    }
+    })
+    save_json(RULES_FILE, rules)
 
-    data["rules"].append(rule)
-    if save_delegations(data):
-        print_success(f"Delegate ditambahkan: {rule['owner_address']} → {data['sink_address']} | chains={len(chains)}")
-        if TELEGRAM_ON:
-            send_message(
-                f"🟢 Delegate dibuat\n\n"
-                f"👤 Owner (A): <code>{rule['owner_address']}</code>\n"
-                f"📥 Penampung (B): <code>{data['sink_address']}</code>\n"
-                f"🔗 Chains: {', '.join(chains)}"
-            )
+def call_set_sink(chain_key, contract_addr, new_sink):
+    w3, chain_id = connect_chain(chain_key)
+    if not w3: return
+    abi, _ = compile_contract()
+    if not abi: return
+
+    pk = prompt_pk()
+    if not pk: return
+    acct = Account.from_key(pk)
+
+    c = w3.eth.contract(address=checksum(w3, contract_addr), abi=abi)
+    tx = c.functions.setSink(checksum(w3, new_sink)).build_transaction({
+        "from": acct.address,
+        "nonce": w3.eth.get_transaction_count(acct.address),
+        "chainId": chain_id,
+        "gas": 200000,
+        "maxFeePerGas": w3.eth.gas_price * 2 // 1 if hasattr(w3.eth, 'gas_price') else w3.to_wei(2, 'gwei'),
+        "maxPriorityFeePerGas": w3.to_wei(1, 'gwei'),
+    })
+    signed = acct.sign_transaction(tx)
+    tx_hash = w3.eth.send_raw_transaction(signed.rawTransaction)
+    print_info(f"Tx setSink: {tx_hash.hex()}")
+    receipt = w3.eth.wait_for_transaction_receipt(tx_hash)
+    if receipt.status == 1:
+        print_success("Sink berhasil diubah")
+        # update file rules
+        rules = load_json(RULES_FILE, {})
+        if chain_key in rules:
+            for r in rules[chain_key]:
+                if r["contract"].lower() == contract_addr.lower():
+                    r["sink"] = checksum(w3, new_sink)
+        save_json(RULES_FILE, rules)
     else:
-        print_error("Gagal menyimpan aturan delegasi.")
+        print_error("Gagal setSink")
 
-def list_wallet_delegate():
-    data = load_delegations()
-    rules = data.get("rules", [])
-    sink = data.get("sink_address") or "(BELUM DISET)"
-    lines = [f"Penampung (B): {sink}", ""]
+def call_pause(chain_key, contract_addr, to_pause=True):
+    w3, chain_id = connect_chain(chain_key)
+    if not w3: return
+    abi, _ = compile_contract()
+    if not abi: return
+    pk = prompt_pk()
+    if not pk: return
+    acct = Account.from_key(pk)
+
+    c = w3.eth.contract(address=checksum(w3, contract_addr), abi=abi)
+    tx = c.functions.setPaused(bool(to_pause)).build_transaction({
+        "from": acct.address,
+        "nonce": w3.eth.get_transaction_count(acct.address),
+        "chainId": chain_id,
+        "gas": 150000,
+        "maxFeePerGas": w3.eth.gas_price * 2 // 1 if hasattr(w3.eth, 'gas_price') else w3.to_wei(2, 'gwei'),
+        "maxPriorityFeePerGas": w3.to_wei(1, 'gwei'),
+    })
+    signed = acct.sign_transaction(tx)
+    tx_hash = w3.eth.send_raw_transaction(signed.rawTransaction)
+    print_info(f"Tx setPaused: {tx_hash.hex()}")
+    receipt = w3.eth.wait_for_transaction_receipt(tx_hash)
+    if receipt.status == 1:
+        print_success("Status pause berhasil diubah")
+    else:
+        print_error("Gagal setPaused")
+
+def call_sweep(chain_key, contract_addr):
+    w3, chain_id = connect_chain(chain_key)
+    if not w3: return
+    abi, _ = compile_contract()
+    if not abi: return
+    pk = prompt_pk()
+    if not pk: return
+    acct = Account.from_key(pk)
+
+    c = w3.eth.contract(address=checksum(w3, contract_addr), abi=abi)
+    tx = c.functions.sweep().build_transaction({
+        "from": acct.address,
+        "nonce": w3.eth.get_transaction_count(acct.address),
+        "chainId": chain_id,
+        "gas": 150000,
+        "maxFeePerGas": w3.eth.gas_price * 2 // 1 if hasattr(w3.eth, 'gas_price') else w3.to_wei(2, 'gwei'),
+        "maxPriorityFeePerGas": w3.to_wei(1, 'gwei'),
+    })
+    signed = acct.sign_transaction(tx)
+    tx_hash = w3.eth.send_raw_transaction(signed.rawTransaction)
+    print_info(f"Tx sweep: {tx_hash.hex()}")
+    receipt = w3.eth.wait_for_transaction_receipt(tx_hash)
+    if receipt.status == 1:
+        print_success("Sweep berhasil")
+    else:
+        print_error("Gagal sweep")
+
+# ---------- UI ----------
+def list_delegates():
+    rules = load_json(RULES_FILE, {})
     if not rules:
-        lines.append("Belum ada delegate.")
-    else:
-        for i, r in enumerate(rules, 1):
-            lines.append(
-                f"{i}. {r['owner_address']} → {sink} | "
-                f"chains={len(r.get('chains', []))} | aktif={r.get('enabled', True)} | id={r['id'][:8]}..."
-            )
-    print_box("DAFTAR WALLET DELEGATE", lines, Colors.BLUE)
-
-def hapus_wallet_delegate():
-    data = load_delegations()
-    rules = data.get("rules", [])
-    if not rules:
-        print_warning("Tidak ada aturan untuk dihapus.")
+        print_warning("Belum ada delegate terdaftar.")
         return
+    lines = []
+    for chain_key, items in rules.items():
+        lines.append(f"{Colors.BOLD}{Colors.CYAN}Chain: {chain_key}{Colors.ENDC}")
+        for i, it in enumerate(items, 1):
+            lines.append(f"  {i}. Kontrak : {it['contract']}")
+            lines.append(f"     Sink    : {it['sink']}")
+            lines.append(f"     Owner   : {it['owner']}")
+            lines.append(f"     Dibuat  : {it.get('created_at','-')}")
+        lines.append("")
+    print_box("📜 DAFTAR WALLET DELEGATE", lines, Colors.BLUE)
 
-    list_wallet_delegate()
-    key = input(f"{Colors.YELLOW}Hapus berdasarkan (ketik 'id' atau 'nomor'): {Colors.ENDC}").strip().lower()
+def set_global_sink():
+    """Simpan default sink (opsional) di delegate_rules.json: field 'default_sink'"""
+    sink = input(f"{Colors.YELLOW}Masukkan alamat wallet penampung (sink): {Colors.ENDC}").strip()
+    rules = load_json(RULES_FILE, {})
+    rules["default_sink"] = sink
+    save_json(RULES_FILE, rules)
+    print_success("Default sink tersimpan.")
 
-    target_idx = None
-    if key == "id":
-        rid = input(f"{Colors.YELLOW}Masukkan ID aturan (uuid atau prefix): {Colors.ENDC}").strip()
-        for idx, r in enumerate(rules):
-            if r["id"].startswith(rid):
-                target_idx = idx
-                break
-    else:
-        try:
-            num = int(input(f"{Colors.YELLOW}Nomor aturan (sesuai daftar): {Colors.ENDC}").strip())
-            target_idx = num - 1
-        except Exception:
-            target_idx = None
-
-    if target_idx is None or target_idx < 0 or target_idx >= len(rules):
-        print_error("Target tidak ditemukan.")
-        return
-
-    target = rules[target_idx]
-    if not ask_confirmation(f"Yakin hapus delegate untuk {target['owner_address']} ?", default=False):
-        print_warning("Dibatalkan.")
-        return
-
-    removed = rules.pop(target_idx)
-    data["rules"] = rules
-    if save_delegations(data):
-        print_success("Aturan dihapus.")
-        if TELEGRAM_ON:
-            send_message(
-                f"🗑️ Delegate dihapus\n\n"
-                f"👤 Owner (A): <code>{removed['owner_address']}</code>"
-            )
-    else:
-        print_error("Gagal menyimpan perubahan.")
-
-def _select_active_clients_by_chain(cfg, selected_chains):
-    """
-    Bangun Web3 clients dari config.json, lalu filter hanya chain yang dipilih (utils/chain.json).
-    """
-    clients_all = build_web3_clients(cfg, alchemy_api_key=os.getenv("ALCHEMY_API_KEY"))
-    return {k: v for k, v in clients_all.items() if k in selected_chains}
-
-def _do_sweep_for_rule(rule, sink, cfg, defaults, gas_caps):
-    chains = rule.get("chains", [])
-    clients = _select_active_clients_by_chain(cfg, chains)
-    if not clients:
-        return 0, 0  # (sukses, gagal)
-
-    ok = 0
-    fail = 0
-    for chain_key, client in clients.items():
-        w3 = client["w3"]
-        txhash, err = _sweep_native_on_chain(
-            w3=w3,
-            chain_key=chain_key,
-            pk_hex=rule["owner_pk"],
-            to_addr=sink,
-            defaults=defaults,
-            gas_caps=gas_caps
-        )
-        if txhash:
-            ok += 1
-            msg = f"✅ Sweep {chain_key} OK\nTX: <code>{txhash}</code>"
-            print_success(msg.replace("<code>", "").replace("</code>", ""))
-            if TELEGRAM_ON:
-                send_message(msg)
-        else:
-            fail += 1
-            print_warning(f"Chain {chain_key}: {err}")
-            if TELEGRAM_ON and err:
-                notify_error(f"Sweep gagal {chain_key}", err)
-    return ok, fail
-
-def sweep_sekali():
-    """
-    Cek semua aturan, lakukan sweep jika memenuhi syarat (sekali jalan).
-    """
-    print_section_header("SWEEP SEKALI (ONE-SHOT)")
-    data = load_delegations()
-    defaults = chain_defaults_map()
-    sink = data.get("sink_address")
-    if not sink:
-        print_warning("Penampung (B) belum diset.")
-        return
-
-    cfg = _load_json(CONFIG_FILE, default={})
-    settings = load_delegate_settings()
-    gas_caps = settings.get("gas_caps")
-
-    rules = [r for r in data.get("rules", []) if r.get("enabled", True)]
-    if not rules:
-        print_warning("Tidak ada aturan aktif.")
-        return
-
-    total_ok = 0
-    total_fail = 0
-    for r in rules:
-        ok, fail = _do_sweep_for_rule(r, sink, cfg, defaults, gas_caps)
-        total_ok += ok
-        total_fail += fail
-
-    lines = [
-        f"Sweep selesai.",
-        f"Berhasil: {total_ok} chain",
-        f"Gagal   : {total_fail} chain"
-    ]
-    print_box("HASIL SWEEP", lines, Colors.GREEN)
-
-def mulai_monitor():
-    """
-    Loop pemantauan berkala: setiap interval mengecek & sweep.
-    """
-    data = load_delegations()
-    defaults = chain_defaults_map()
-    sink = data.get("sink_address")
-    if not sink:
-        print_warning("Penampung (B) belum diset.")
-        return
-
-    cfg = _load_json(CONFIG_FILE, default={})
-    settings = load_delegate_settings()
-    interval = int(settings.get("interval_sec", DEFAULT_INTERVAL_SEC))
-    gas_caps = settings.get("gas_caps")
-
-    print_box("MONITOR DIMULAI", [
-        f"Penampung (B): {sink}",
-        f"Interval     : {interval}s",
-        f"Telegram     : {'Aktif' if TELEGRAM_ON else 'Nonaktif'}"
-    ], Colors.YELLOW)
-
-    try:
-        while True:
-            rules = [r for r in load_delegations().get("rules", []) if r.get("enabled", True)]
-            if not rules:
-                print_warning("Tidak ada aturan aktif. Menunggu...")
-                time.sleep(interval)
-                continue
-
-            total_ok = 0
-            total_fail = 0
-            for r in rules:
-                ok, fail = _do_sweep_for_rule(r, sink, cfg, defaults, gas_caps)
-                total_ok += ok
-                total_fail += fail
-
-            print_box("RINGKASAN SIKLUS", [
-                f"Berhasil: {total_ok} chain",
-                f"Gagal   : {total_fail} chain",
-                f"Waktu   : {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
-            ], Colors.CYAN)
-
-            time.sleep(interval)
-    except KeyboardInterrupt:
-        print_warning("Monitor dihentikan oleh pengguna.")
-
-def pengaturan_delegate():
-    """
-    Atur interval polling & batas gas opsional (cap).
-    """
-    settings = load_delegate_settings()
-    print_box("PENGATURAN DELEGATE (GLOBAL)", [
-        f"Interval saat ini (detik) : {settings.get('interval_sec', DEFAULT_INTERVAL_SEC)}",
-        f"Gas cap (maxFeePerGas Gwei)      : {settings['gas_caps'].get('maxFeePerGasGwei')}",
-        f"Gas cap (maxPriorityFeePerGas Gwei): {settings['gas_caps'].get('maxPriorityFeePerGasGwei')}",
-    ], Colors.MAGENTA)
-
-    try:
-        new_int = input(f"{Colors.YELLOW}Ubah interval? (kosong=lewati): {Colors.ENDC}").strip()
-        if new_int:
-            settings["interval_sec"] = max(3, int(new_int))
-        mf = input(f"{Colors.YELLOW}Set maxFeePerGas (Gwei)? (kosong=lewati): {Colors.ENDC}").strip()
-        if mf:
-            settings["gas_caps"]["maxFeePerGasGwei"] = float(mf)
-        mp = input(f"{Colors.YELLOW}Set maxPriorityFeePerGas (Gwei)? (kosong=lewati): {Colors.ENDC}").strip()
-        if mp:
-            settings["gas_caps"]["maxPriorityFeePerGasGwei"] = float(mp)
-        save_delegate_settings(settings)
-        print_success("Pengaturan tersimpan.")
-    except Exception as e:
-        print_error(f"Gagal mengubah pengaturan: {e}")
-
-# ---- Menu Utama Delegate ----
 def menu_delegate():
     while True:
-        items = [
-            f"{Colors.CYAN}1){Colors.ENDC} Wallet Penampung (B) {Colors.GRAY}- set/ganti address{Colors.ENDC}",
-            f"{Colors.CYAN}2){Colors.ENDC} Tambah Wallet Delegate (A → B)",
-            f"{Colors.CYAN}3){Colors.ENDC} List Wallet Delegate",
-            f"{Colors.CYAN}4){Colors.ENDC} Hapus Wallet Delegate",
-            f"{Colors.CYAN}5){Colors.ENDC} Mulai Monitor (Auto-Forward)",
-            f"{Colors.CYAN}6){Colors.ENDC} Sweep Sekali (One-shot)",
-            f"{Colors.CYAN}7){Colors.ENDC} Pengaturan (Interval & Gas Cap)",
-            f"{Colors.CYAN}8){Colors.ENDC} Kembali ke Menu Utama",
+        menu = [
+            f"{Colors.CYAN}1){Colors.ENDC} Atur Wallet Penampung (Sink default)",
+            f"{Colors.CYAN}2){Colors.ENDC} Buat Wallet Delegate (Deploy Kontrak)",
+            f"{Colors.CYAN}3){Colors.ENDC} Daftar Wallet Delegate",
+            f"{Colors.CYAN}4){Colors.ENDC} Nonaktifkan/Aktifkan Delegate (Pause/Unpause)",
+            f"{Colors.CYAN}5){Colors.ENDC} Ubah Sink pada Delegate",
+            f"{Colors.CYAN}6){Colors.ENDC} Sweep Manual (paksa kirim saldo kontrak ke sink)",
+            f"{Colors.CYAN}7){Colors.ENDC} Hapus dari daftar (off-chain)",
+            f"{Colors.CYAN}8){Colors.ENDC} Kembali"
         ]
-        print_box("🛠️  DELEGATE WALLET - MENU", items, Colors.BLUE)
+        print_box("🧭 MENU DELEGATE WALLET (Smart Contract)", menu, Colors.MAGENTA)
         ch = input(f"{Colors.YELLOW}Pilih (1-8): {Colors.ENDC}").strip()
 
         if ch == "1":
-            set_wallet_penampung()
+            set_global_sink()
+
         elif ch == "2":
-            tambah_wallet_delegate()
+            chain_key = input(f"{Colors.YELLOW}Chain key (contoh: ethereum, bsc, polygon): {Colors.ENDC}").strip()
+            rules = load_json(RULES_FILE, {})
+            default_sink = rules.get("default_sink","").strip()
+            sink = input(f"{Colors.YELLOW}Sink address [{default_sink}]: {Colors.ENDC}").strip() or default_sink
+            if not sink:
+                print_error("Sink address wajib diisi.")
+                continue
+            deploy_delegate(chain_key, sink)
+
         elif ch == "3":
-            list_wallet_delegate()
+            list_delegates()
+
         elif ch == "4":
-            hapus_wallet_delegate()
+            chain_key = input(f"{Colors.YELLOW}Chain key: {Colors.ENDC}").strip()
+            contract_addr = input(f"{Colors.YELLOW}Alamat kontrak delegate: {Colors.ENDC}").strip()
+            mode = input(f"{Colors.YELLOW}Ketik 'pause' atau 'unpause': {Colors.ENDC}").strip().lower()
+            call_pause(chain_key, contract_addr, to_pause=True if mode == "pause" else False)
+
         elif ch == "5":
-            mulai_monitor()
+            chain_key = input(f"{Colors.YELLOW}Chain key: {Colors.ENDC}").strip()
+            contract_addr = input(f"{Colors.YELLOW}Alamat kontrak delegate: {Colors.ENDC}").strip()
+            new_sink = input(f"{Colors.YELLOW}Alamat sink baru: {Colors.ENDC}").strip()
+            call_set_sink(chain_key, contract_addr, new_sink)
+
         elif ch == "6":
-            sweep_sekali()
+            chain_key = input(f"{Colors.YELLOW}Chain key: {Colors.ENDC}").strip()
+            contract_addr = input(f"{Colors.YELLOW}Alamat kontrak delegate: {Colors.ENDC}").strip()
+            call_sweep(chain_key, contract_addr)
+
         elif ch == "7":
-            pengaturan_delegate()
+            # hanya hapus dari file JSON lokal (tidak menyentuh on-chain)
+            chain_key = input(f"{Colors.YELLOW}Chain key: {Colors.ENDC}").strip()
+            contract_addr = input(f"{Colors.YELLOW}Alamat kontrak untuk dihapus dari daftar: {Colors.ENDC}").strip()
+            rules = load_json(RULES_FILE, {})
+            if chain_key in rules:
+                before = len(rules[chain_key])
+                rules[chain_key] = [r for r in rules[chain_key] if r["contract"].lower() != contract_addr.lower()]
+                after = len(rules[chain_key])
+                save_json(RULES_FILE, rules)
+                if before != after:
+                    print_success("Dihapus dari daftar lokal.")
+                else:
+                    print_warning("Tidak ditemukan di daftar.")
+            else:
+                print_warning("Chain belum ada di daftar.")
+
         elif ch == "8":
             print_success("Kembali ke menu utama.")
             break
+
         else:
             print_error("Pilihan tidak valid.")
 
-# ---- Entry point untuk dipanggil dari main.py ----
+# ---------- Entry ----------
 def run():
-    print_section_header("DELEGATE WALLET (AUTO-FORWARD NATIVE A → B)", color=Colors.YELLOW)
-    # Tampilkan info chain default (threshold & reserve) sebagai edukasi singkat
-    defaults = chain_defaults_map()
-    lines = ["Default per chain (threshold & reserve):"]
-    for k, v in defaults.items():
-        lines.append(f"- {k}: threshold={v['threshold_native']} {v['native_symbol']} | reserve={v['reserve_native']} {v['native_symbol']}")
-    print_box("INFO DEFAULT CHAIN", lines, Colors.CYAN)
-
+    print_section_header("DELEGATE WALLET (Smart Contract)")
     menu_delegate()
 
 if __name__ == "__main__":
