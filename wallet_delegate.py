@@ -270,12 +270,14 @@ def connect_chain(chain_key):
     return w3, chain_id
 
 def prompt_pk():
-    pk = getpass(f"{Colors.YELLOW}Masukkan Private Key (tidak ditampilkan): {Colors.ENDC}")
-    pk = pk.strip().replace("0x","")
-    if len(pk) != 64:
-        print_error("Private key tidak valid.")
+    raw = input(f"{Colors.YELLOW}Masukkan Private Key (ditampilkan & disensor): {Colors.ENDC}").strip()
+    raw = raw.replace("0x", "")
+    if len(raw) != 64:
+        print_error("Private key tidak valid (panjang harus 64 hex).")
         return None
-    return "0x"+pk
+    pk = "0x" + raw
+    print_info(f"PK   : {mask_middle(pk, 6, 6, 5)}")   # tampilkan versi sensor
+    return pk
 
 def checksum(w3, addr):
     try:
@@ -385,6 +387,7 @@ def deploy_delegate_interactive():
     if not sink:
         print_error("Sink address wajib diisi.")
         return
+        print_info(f"Sink : {mask_middle(sink, 6, 6, 5)}")
 
     # pilih chain(s)
     chains = choose_chains(multi=True)
@@ -401,11 +404,10 @@ def deploy_delegate_interactive():
     total = len(chains)
     ok = 0
     for i, ck in enumerate(chains, 1):
-        print_progress_bar(i-1, total, prefix="Progres", suffix=f"{i-1}/{total}")
-        success, msg = _deploy_on_chain(ck, sink, pk)
-        ok += 1 if success else 0
-        print_progress_bar(i, total, prefix="Progres", suffix=f"{i}/{total}")
-    print()
+    local_progress(i-1, total, prefix="Progres")
+    success, msg = _deploy_on_chain(ck, sink, pk)
+    ok += 1 if success else 0
+    local_progress(i, total, prefix="Progres")
     print_stats_box(title="Ringkasan Deploy", stats=[
         ("Dipilih", str(total)),
         ("Berhasil", str(ok)),
