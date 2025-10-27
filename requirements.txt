@@ -4,3 +4,4 @@ eth-account
 python-dotenv
 requests
 py-solc-x
+questionary
