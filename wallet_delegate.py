@@ -377,9 +377,11 @@ def _deploy_on_chain(chain_key, sink, pk):
     return True, addr
 
 def deploy_delegate_interactive():
-    # sink
+    # ambil sink default
     rules = load_json(RULES_FILE, {})
     default_sink = rules.get("default_sink", "").strip()
+
+    # input sink (tampil & disensor)
     if questionary:
         sink = questionary.text(f"Sink address [{default_sink}]:").ask() or default_sink
     else:
@@ -387,7 +389,7 @@ def deploy_delegate_interactive():
     if not sink:
         print_error("Sink address wajib diisi.")
         return
-        print_info(f"Sink : {mask_middle(sink, 6, 6, 5)}")
+    print_info(f"Sink : {mask_middle(sink, 6, 6, 5)}")
 
     # pilih chain(s)
     chains = choose_chains(multi=True)
@@ -395,19 +397,21 @@ def deploy_delegate_interactive():
         print_warning("Tidak ada chain dipilih.")
         return
 
-    # pk
+    # input PK (tampil & disensor oleh prompt_pk)
     pk = prompt_pk()
     if not pk:
         return
 
-    # batch deploy
+    # batch deploy dengan progress
     total = len(chains)
     ok = 0
     for i, ck in enumerate(chains, 1):
-    local_progress(i-1, total, prefix="Progres")
-    success, msg = _deploy_on_chain(ck, sink, pk)
-    ok += 1 if success else 0
-    local_progress(i, total, prefix="Progres")
+        local_progress(i - 1, total, prefix="Progres")
+        success, _ = _deploy_on_chain(ck, sink, pk)
+        if success:
+            ok += 1
+        local_progress(i, total, prefix="Progres")
+
     print_stats_box(title="Ringkasan Deploy", stats=[
         ("Dipilih", str(total)),
         ("Berhasil", str(ok)),
