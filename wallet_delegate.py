@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
--- coding: utf-8 --
+#-- coding: utf-8 --
 
 """
 wallet_delegate.py - Smart-Contract based Delegate Wallet (Menu 3)
