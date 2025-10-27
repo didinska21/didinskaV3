@@ -473,22 +473,23 @@ def menu_delegate():
         ]
         print_box("🧭 MENU DELEGATE WALLET (Smart Contract)", menu, Colors.MAGENTA)
 
+        # --- Pilihan menu utama ---
         if questionary:
-    ch = questionary.select(
-        "Pilih menu:",
-        choices=[
-            QChoice("1) Atur Sink default", "1"),
-            QChoice("2) Buat Delegate (Single/Multi)", "2"),
-            QChoice("3) Daftar Delegate", "3"),
-            QChoice("4) Pause/Unpause", "4"),
-            QChoice("5) Ubah Sink", "5"),
-            QChoice("6) Sweep Manual", "6"),
-            QChoice("7) Hapus dari daftar (off-chain)", "7"),
-            QChoice("8) Kembali", "8"),
-        ],
-    ).ask()
-else:
-    ch = input(f"{Colors.YELLOW}Pilih (1-8): {Colors.ENDC}").strip()
+            ch = questionary.select(
+                "Pilih menu:",
+                choices=[
+                    QChoice("1) Atur Sink default", "1"),
+                    QChoice("2) Buat Delegate (Single/Multi)", "2"),
+                    QChoice("3) Daftar Delegate", "3"),
+                    QChoice("4) Pause/Unpause", "4"),
+                    QChoice("5) Ubah Sink", "5"),
+                    QChoice("6) Sweep Manual", "6"),
+                    QChoice("7) Hapus dari daftar (off-chain)", "7"),
+                    QChoice("8) Kembali", "8"),
+                ],
+            ).ask()
+        else:
+            ch = input(f"{Colors.YELLOW}Pilih (1-8): {Colors.ENDC}").strip()
 
         if ch == "1":
             set_global_sink()
