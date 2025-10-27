@@ -147,7 +147,24 @@ contract DelegateWallet {
     }
 }
 """
+# ---------- Masker & Progress ----------
+def mask_middle(s: str, head: int = 6, tail: int = 6, stars: int = 5) -> str:
+    """Sensor string: simpan head & tail, tengah ganti *****"""
+    if not s:
+        return s
+    if len(s) <= head + tail:
+        return s
+    return s[:head] + ("*" * stars) + s[-tail:]
 
+def local_progress(current: int, total: int, prefix: str = "Progres"):
+    """Progress bar sederhana tanpa dependency utils.ui."""
+    width = 30
+    ratio = 0 if total == 0 else current / total
+    fill = int(width * ratio)
+    bar = "#" * fill + "-" * (width - fill)
+    print(f"\r{prefix} [{bar}] {current}/{total}", end="", flush=True)
+    if current == total:
+        print()  
 # ---------- Compiler ----------
 def compile_contract():
     try:
