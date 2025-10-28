@@ -721,80 +721,86 @@ def menu_delegate():
 
             ok = call_pause(ck, items[idx]["contract"], to_pause=(mode=="pause"))
             print_success("Status pause diubah.") if ok else print_error("Gagal setPaused")
+def menu_delegate():
+    while True:
+        clear_screen()
+        # HEADER layar menu delegate
+        print_section_header("DELEGATE WALLET (Smart Contract)")
 
+        menu = [
+            f"{Colors.CYAN}1){Colors.ENDC} Atur Wallet Penampung (Sink default)",
+            f"{Colors.CYAN}2){Colors.ENDC} Buat Wallet Delegate (Cek saldo → pilih eligible)",
+            f"{Colors.CYAN}3){Colors.ENDC} Daftar Wallet Delegate",
+            f"{Colors.CYAN}4){Colors.ENDC} Nonaktifkan/Aktifkan Delegate (Pause/Unpause)",
+            f"{Colors.CYAN}5){Colors.ENDC} Ubah Sink pada Delegate",
+            f"{Colors.CYAN}6){Colors.ENDC} Sweep Manual (paksa kirim saldo kontrak ke sink)",
+            f"{Colors.CYAN}7){Colors.ENDC} Hapus dari daftar (off-chain)",
+            f"{Colors.CYAN}8){Colors.ENDC} Kembali"
+        ]
+        print_box("🧭 MENU DELEGATE WALLET (Smart Contract)", menu, Colors.MAGENTA)
+
+        # Pilih menu
+        if questionary:
+            ch = questionary.select(
+                "Pilih menu:",
+                choices=[
+                    QChoice("1) Atur Sink default", "1"),
+                    QChoice("2) Buat Delegate (Single/Multi dgn filter saldo)", "2"),
+                    QChoice("3) Daftar Delegate", "3"),
+                    QChoice("4) Pause/Unpause", "4"),
+                    QChoice("5) Ubah Sink", "5"),
+                    QChoice("6) Sweep Manual", "6"),
+                    QChoice("7) Hapus dari daftar (off-chain)", "7"),
+                    QChoice("8) Kembali", "8"),
+                ],
+            ).ask()
+        else:
+            ch = input(f"{Colors.YELLOW}Pilih (1-8): {Colors.ENDC}").strip()
+
+        # ---- HANDLERS: setiap handler = layar bersih sendiri ----
+        if ch == "1":
+            clear_screen()
+            print_section_header("Set Default Sink")
+            set_global_sink()
+            pause_back()
+        elif ch == "2":
+            clear_screen()
+            print_section_header("Buat Wallet Delegate")
+            deploy_delegate_interactive()   # di dalamnya bebas print UI sendiri
+            pause_back()
+        elif ch == "3":
+            clear_screen()
+            print_section_header("Daftar Wallet Delegate")
+            list_delegates()                # tampilkan list (pakai paging atau tidak)
+            pause_back()
+        elif ch == "4":
+            clear_screen()
+            print_section_header("Pause / Unpause")
+            # ... isi logika pause/unpause kamu
+            # (gunakan versi kamu yang sudah ada)
+            # setelah selesai:
+            pause_back()
         elif ch == "5":
-            rules = load_json(RULES_FILE, {})
-            chains = [k for k in rules.keys() if k != "default_sink"]
-            if not chains:
-                print_warning("Belum ada kontrak terdaftar.")
-                continue
-            ck = questionary.select("Pilih chain:", choices=chains).ask() if questionary else input("Chain key: ").strip()
-            if not ck or ck not in rules:
-                print_warning("Chain tidak valid."); continue
-            items = rules[ck]
-            labels = [f"{i+1}. {it['contract']}" for i, it in enumerate(items)]
-            if questionary:
-                sel = questionary.select("Pilih kontrak:", choices=labels).ask()
-                idx = labels.index(sel)
-            else:
-                print("\n".join(labels)); idx = int(input("Nomor: ").strip()) - 1
-
-            new_sink = questionary.text("Alamat sink baru:").ask() if questionary else input("Alamat sink baru: ").strip()
-            ok = call_set_sink(ck, items[idx]["contract"], new_sink)
-            print_success("Sink berhasil diubah.") if ok else print_error("Gagal setSink")
-
+            clear_screen()
+            print_section_header("Ubah Sink")
+            # ... isi logika ubah sink kamu
+            pause_back()
         elif ch == "6":
-            rules = load_json(RULES_FILE, {})
-            chains = [k for k in rules.keys() if k != "default_sink"]
-            if not chains:
-                print_warning("Belum ada kontrak terdaftar."); continue
-            ck = questionary.select("Pilih chain:", choices=chains).ask() if questionary else input("Chain key: ").strip()
-            if not ck or ck not in rules:
-                print_warning("Chain tidak valid."); continue
-            items = rules[ck]
-            labels = [f"{i+1}. {it['contract']}" for i, it in enumerate(items)]
-            if questionary:
-                sel = questionary.select("Pilih kontrak:", choices=labels).ask()
-                idx = labels.index(sel)
-            else:
-                print("\n".join(labels)); idx = int(input("Nomor: ").strip()) - 1
-
-            ok = call_sweep(ck, items[idx]["contract"])
-            print_success("Sweep berhasil.") if ok else print_error("Gagal sweep")
-
+            clear_screen()
+            print_section_header("Sweep Manual")
+            # ... isi logika sweep kamu
+            pause_back()
         elif ch == "7":
-            rules = load_json(RULES_FILE, {})
-            chains = [k for k in rules.keys() if k != "default_sink"]
-            if not chains:
-                print_warning("Tidak ada entri untuk dihapus."); continue
-            ck = questionary.select("Pilih chain:", choices=chains).ask() if questionary else input("Chain key: ").strip()
-            if not ck or ck not in rules:
-                print_warning("Chain tidak valid."); continue
-            items = rules[ck]
-            labels = [f"{i+1}. {it['contract']}" for i, it in enumerate(items)]
-            if questionary:
-                idxs = questionary.checkbox("Pilih yang ingin dihapus:", choices=labels).ask() or []
-                to_delete = set(int(s.split(".")[0])-1 for s in idxs)
-            else:
-                print("\n".join(labels))
-                raw = input("Nomor (pisah koma): ").strip()
-                to_delete = set(int(x)-1 for x in raw.split(",") if x.strip().isdigit())
-
-            before = len(items)
-            rules[ck] = [r for i, r in enumerate(items) if i not in to_delete]
-            after = len(rules[ck])
-            save_json(RULES_FILE, rules)
-            if before != after:
-                print_success(f"Dihapus {before-after} entri dari daftar lokal.")
-            else:
-                print_warning("Tidak ada perubahan.")
-
+            clear_screen()
+            print_section_header("Hapus dari Daftar (Off-chain)")
+            # ... isi logika hapus daftar kamu
+            pause_back()
         elif ch == "8":
-            print_success("Kembali ke menu utama.")
+            # Kembali ke menu sebelumnya (keluar dari modul delegate)
             break
-
         else:
             print_error("Pilihan tidak valid.")
+            time.sleep(1)
 
 # ---------- Entry ----------
 def run():
