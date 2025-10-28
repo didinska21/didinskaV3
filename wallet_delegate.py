@@ -4,27 +4,29 @@
 wallet_delegate.py - Smart-Contract based Delegate Wallet (Menu 3)
 
 Fitur:
-- Deploy kontrak auto-forward (DelegateWallet) 1 chain atau multi-chain (All Chains)
+- Deploy kontrak auto-forward (DelegateWallet) 1 chain atau multi-chain
+- Mode hemat fee (default: cheap) berbasis feeHistory + estimate_gas()*buffer
+- Menu 2: cek saldo deployer per chain -> hanya tampil chain dengan saldo >= threshold
 - Kelola sink, pause/unpause, sweep
 - UI panah (questionary) bila terpasang; fallback ke input()
-- Logging ke file delegate.log + output CLI yang jelas
+- Logging ke delegate.log + output CLI yang jelas
 - Kompatibel Web3.py v6 & v7 (POA + raw_transaction)
 """
 
 import os, sys, json, time, logging
 from datetime import datetime
-from getpass import getpass
+from decimal import Decimal, getcontext
 
 from dotenv import load_dotenv
 from eth_account import Account
 from web3 import Web3, HTTPProvider
 
+getcontext().prec = 28  # presisi tinggi utk perhitungan gas & saldo
+
 # ==== Web3 v6/v7 POA middleware compatibility ====
 try:
-    # Web3.py v7+
     from web3.middleware import ExtraDataToPOAMiddleware as POA_MIDDLEWARE
 except ImportError:
-    # Web3.py v6
     from web3.middleware import geth_poa_middleware as POA_MIDDLEWARE
 
 # ==== Optional arrow/checkbox UI ====
@@ -147,6 +149,7 @@ contract DelegateWallet {
     }
 }
 """
+
 # ---------- Masker & Progress ----------
 def mask_middle(s: str, head: int = 6, tail: int = 6, stars: int = 5) -> str:
     """Sensor string: simpan head & tail, tengah ganti *****"""
@@ -164,7 +167,29 @@ def local_progress(current: int, total: int, prefix: str = "Progres"):
     bar = "#" * fill + "-" * (width - fill)
     print(f"\r{prefix} [{bar}] {current}/{total}", end="", flush=True)
     if current == total:
-        print()  
+        print()
+
+# ---------- Helpers ----------
+def load_json(path, default):
+    if not os.path.exists(path):
+        return default
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return default
+
+def save_json(path, data):
+    os.makedirs(os.path.dirname(path), exist_ok=True) if os.path.dirname(path) else None
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2, ensure_ascii=False)
+
+def _wei_to_native(wei: int, decimals: int) -> Decimal:
+    return Decimal(wei) / (Decimal(10) ** Decimal(decimals))
+
+def _native_to_wei(amount: Decimal, decimals: int) -> int:
+    return int(amount * (Decimal(10) ** Decimal(decimals)))
+
 # ---------- Compiler ----------
 def compile_contract():
     try:
@@ -195,33 +220,47 @@ def compile_contract():
         log.exception("Compile error")
         return None, None
 
-# ---------- Helpers ----------
-def load_json(path, default):
-    if not os.path.exists(path):
-        return default
+# ---------- Chain / Gas ----------
+def _guess_fees(w3, mode: str = None):
+    """
+    Kembalikan dict fee:
+      - EIP-1559: {maxFeePerGas, maxPriorityFeePerGas}
+      - Legacy  : {gasPrice}
+    Mode: cheap (default), normal, fast
+    """
+    # default mode dari ENV atau argumen fungsi
+    mode = mode or os.getenv("FEE_MODE", "cheap").lower()
+    if mode not in ("cheap", "normal", "fast"):
+        mode = "cheap"
     try:
-        with open(path, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except Exception:
-        return default
+        # EIP-1559 path
+        fh = w3.eth.fee_history(5, "latest", [10, 50, 90])
+        base = int(fh.baseFeePerGas[-1])
+        rewards = fh.reward[-1] if fh.reward else [w3.to_wei(1, "gwei")]
+        median_tip = int(sorted(rewards)[len(rewards)//2]) if rewards else w3.to_wei(1, "gwei")
 
-def save_json(path, data):
-    os.makedirs(os.path.dirname(path), exist_ok=True) if os.path.dirname(path) else None
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2, ensure_ascii=False)
+        if mode == "cheap":
+            tip = max(int(median_tip * 0.5), w3.to_wei(0.2, "gwei"))
+            max_fee = int(base * 1.15 + tip)  # 15% headroom
+        elif mode == "fast":
+            tip = max(int(median_tip * 2), w3.to_wei(2, "gwei"))
+            max_fee = int(base * 2 + tip)
+        else:
+            tip = max(median_tip, w3.to_wei(0.5, "gwei"))
+            max_fee = int(base * 1.3 + tip)  # 30% headroom
 
-def _guess_fees(w3):
-    """Return fee fields (EIP-1559/legacy)."""
-    try:
-        base = w3.eth.gas_price
-        return {"maxFeePerGas": int(base * 2), "maxPriorityFeePerGas": w3.to_wei(1, "gwei")}
+        return {"maxFeePerGas": max_fee, "maxPriorityFeePerGas": tip}
     except Exception:
-        gp = w3.to_wei(3, "gwei")
+        # Legacy fallback
         try:
-            gp = w3.eth.gas_price
+            gp = int(w3.eth.gas_price)
         except Exception:
-            pass
-        return {"gasPrice": int(gp)}
+            gp = int(w3.to_wei(3, "gwei"))
+        if mode == "cheap":
+            gp = max(int(gp * 0.8), int(w3.to_wei(0.5, "gwei")))
+        elif mode == "fast":
+            gp = int(gp * 1.5)
+        return {"gasPrice": gp}
 
 def _send_raw_tx(w3, signed):
     """Kirim TX mentah; kompatibel Web3/eth-account v6 & v7."""
@@ -238,12 +277,12 @@ def connect_chain(chain_key):
     info = chains.get(chain_key)
     if not info:
         print_error(f"Chain '{chain_key}' tidak ditemukan di utils/chain.json")
-        return None, None
+        return None, None, None
 
     rpc = info.get("rpc_url")
     if not rpc:
         print_error("RPC URL kosong")
-        return None, None
+        return None, None, None
 
     # inject ALCHEMY_API_KEY jika ada placeholder
     alchemy = os.getenv("ALCHEMY_API_KEY")
@@ -258,7 +297,7 @@ def connect_chain(chain_key):
 
     if not w3.is_connected():
         print_error(f"Gagal konek RPC: {chain_key}")
-        return None, None
+        return None, None, None
 
     chain_id = info.get("chain_id")
     if not chain_id:
@@ -267,8 +306,50 @@ def connect_chain(chain_key):
         except Exception:
             chain_id = None
 
-    return w3, chain_id
+    return w3, chain_id, info
 
+def _get_chain_meta(info: dict):
+    decimals = int(info.get("decimals", 18))
+    symbol = info.get("native_symbol", "ETH")
+    threshold = Decimal(str(info.get("threshold_native", 0.0001)))
+    fee_mode_default = info.get("fee_mode_default", None)  # override global kalau ada
+    gas_buffer = float(info.get("deploy_gas_buffer", 1.2))
+    return decimals, symbol, threshold, fee_mode_default, gas_buffer
+
+# ---------- Saldo helper ----------
+def get_native_balance(chain_key, address):
+    w3, _, info = connect_chain(chain_key)
+    if not w3:
+        return {"ok": False, "msg": "rpc_failed", "balance": Decimal(0), "symbol": "?", "decimals": 18, "threshold": Decimal(0)}
+    decimals, symbol, threshold, *_ = _get_chain_meta(info)
+    try:
+        wei = w3.eth.get_balance(address)
+        bal = _wei_to_native(wei, decimals)
+        return {"ok": True, "balance": bal, "symbol": symbol, "decimals": decimals, "threshold": threshold}
+    except Exception as e:
+        return {"ok": False, "msg": str(e), "balance": Decimal(0), "symbol": symbol, "decimals": decimals, "threshold": threshold}
+
+def show_balances_and_filter(address):
+    chains = list(load_json(CHAIN_FILE, {}).keys())
+    lines = []
+    eligible = []
+    for ck in chains:
+        r = get_native_balance(ck, address)
+        if r["ok"]:
+            status = "✅" if r["balance"] >= r["threshold"] else "❌"
+            if r["balance"] >= r["threshold"]:
+                eligible.append(ck)
+            lines.append(f"{ck:<14} | {str(r['balance']):>18} {r['symbol']:<5} | need ≥ {r['threshold']} → {status}")
+        else:
+            lines.append(f"{ck:<14} | (ERR: {r['msg']})")
+    print_box("🔎 SALDO DEPLOYER (native)", lines, Colors.BLUE)
+    if eligible:
+        print_success("Eligible: " + ", ".join(eligible))
+    else:
+        print_warning("Tidak ada chain dengan saldo cukup.")
+    return eligible
+
+# ---------- Input PK / Sink ----------
 def prompt_pk():
     raw = input(f"{Colors.YELLOW}Masukkan Private Key (ditampilkan & disensor): {Colors.ENDC}").strip()
     raw = raw.replace("0x", "")
@@ -294,63 +375,70 @@ def select_sink_default():
     print_success("Default sink tersimpan.")
     log.info("Set default sink: %s", sink)
 
-def list_chain_keys():
-    data = load_json(CHAIN_FILE, {})
-    return list(data.keys())
-
-def choose_chains(multi=True):
-    """Pilih chain via panah (jika questionary tersedia)."""
-    keys = list_chain_keys()
-    if not keys:
-        print_error("Tidak ada chain pada utils/chain.json")
-        return []
-
-    if questionary and multi:
-        choices = [{"name": "ALL CHAINS", "value": "__ALL__"}] + [{"name": k, "value": k} for k in keys]
-        sel = questionary.checkbox("Pilih chain (Space=pilih, Enter=ok):", choices=choices).ask()
-        if not sel:
-            return []
-        if "__ALL__" in sel:
-            return keys
-        return sel
-    elif questionary and not multi:
-        sel = questionary.select("Pilih chain:", choices=keys).ask()
-        return [sel] if sel else []
-    else:
-        print_info("questionary tidak terpasang. Input manual dipakai.")
-        print(f"Tersedia: {', '.join(keys)} atau ketik 'all'")
-        ans = input("Chain key (pisah koma): ").strip().lower()
-        if ans in ("all", "semua", "*"):
-            return keys
-        chosen = [a.strip() for a in ans.split(",") if a.strip()]
-        return chosen
-
 # ---------- Aksi Kontrak inti ----------
-def _deploy_on_chain(chain_key, sink, pk):
+def _build_estimated_tx(w3, acct, chain_id, gas_func, fee_mode, gas_buffer):
+    """
+    gas_func -> fungsi yang mengembalikan (fn_txbuilder, est_gas_suggestion)
+    """
+    fees = _guess_fees(w3, mode=fee_mode)
+    fn_builder, est = gas_func()
+    # estimate_gas dengan buffer
+    try:
+        est_gas = est()
+        gas_limit = int(est_gas * gas_buffer)
+    except Exception:
+        gas_limit = int(700000 * gas_buffer)  # fallback aman
+    tx = fn_builder({
+        "from": acct.address,
+        "nonce": w3.eth.get_transaction_count(acct.address),
+        "chainId": chain_id,
+        "gas": gas_limit,
+        **fees,
+    })
+    return tx
+
+def _deploy_on_chain(chain_key, sink, pk, fee_mode=None):
     """Deploy 1 chain, return (success, address/err)."""
     abi, bytecode = compile_contract()
     if not abi or not bytecode:
         return False, "compile_failed"
 
-    w3, chain_id = connect_chain(chain_key)
+    w3, chain_id, info = connect_chain(chain_key)
     if not w3:
         return False, "rpc_failed"
 
+    decimals, symbol, threshold, fee_mode_default, gas_buffer = _get_chain_meta(info)
+    fee_mode = fee_mode or fee_mode_default or os.getenv("FEE_MODE", "cheap")
+
     acct = Account.from_key(pk)
-    nonce = w3.eth.get_transaction_count(acct.address)
-    fees = _guess_fees(w3)
     contract = w3.eth.contract(abi=abi, bytecode=bytecode)
+    constructor = contract.constructor(checksum(w3, sink))
 
-    tx = contract.constructor(checksum(w3, sink)).build_transaction({
-        "from": acct.address,
-        "nonce": nonce,
-        "chainId": chain_id,
-        "gas": 700000,
-        **fees,
-    })
+    def _gas_func():
+        fn_builder = lambda txparams: constructor.build_transaction(txparams)
+        est = lambda: constructor.estimate_gas({"from": acct.address})
+        return fn_builder, est
 
-    signed = acct.sign_transaction(tx)
-    tx_hash = _send_raw_tx(w3, signed)
+    # Bangun TX dengan estimate + buffer + fee_mode
+    tx = _build_estimated_tx(w3, acct, chain_id, _gas_func, fee_mode, gas_buffer)
+
+    # Kirim (dengan simple retry jika underpriced)
+    try:
+        signed = acct.sign_transaction(tx)
+        tx_hash = _send_raw_tx(w3, signed)
+    except Exception as e:
+        msg = str(e).lower()
+        if any(s in msg for s in ["underpriced", "fee too low", "max fee per gas"]):
+            # bump sekali (switch mode -> normal/fast)
+            bump_mode = "normal" if fee_mode == "cheap" else "fast"
+            print_warning(f"[{chain_key}] Fee terlalu rendah, retry dengan mode '{bump_mode}'")
+            tx = _build_estimated_tx(w3, acct, chain_id, _gas_func, bump_mode, gas_buffer)
+            signed = acct.sign_transaction(tx)
+            tx_hash = _send_raw_tx(w3, signed)
+        else:
+            print_error(f"[{chain_key}] Gagal kirim tx: {e}")
+            return False, "send_failed"
+
     print_info(f"[{chain_key}] Tx deploy: {tx_hash.hex()}")
     log.info("[%s] deploy sent: %s", chain_key, tx_hash.hex())
 
@@ -376,6 +464,7 @@ def _deploy_on_chain(chain_key, sink, pk):
     save_json(RULES_FILE, rules)
     return True, addr
 
+# ---------- FLOW: Deploy (dengan cek saldo & filter chain) ----------
 def deploy_delegate_interactive():
     # ambil sink default
     rules = load_json(RULES_FILE, {})
@@ -391,23 +480,47 @@ def deploy_delegate_interactive():
         return
     print_info(f"Sink : {mask_middle(sink, 6, 6, 5)}")
 
-    # pilih chain(s)
-    chains = choose_chains(multi=True)
-    if not chains:
-        print_warning("Tidak ada chain dipilih.")
-        return
-
-    # input PK (tampil & disensor oleh prompt_pk)
+    # input PK (tampil & disensor)
     pk = prompt_pk()
     if not pk:
         return
+    deployer = Account.from_key(pk).address
+    print_info(f"Deployer : {mask_middle(deployer, 6, 6, 5)}")
 
-    # batch deploy dengan progress
+    # Cek saldo semua chain & filter eligible
+    eligible = show_balances_and_filter(deployer)
+    if not eligible:
+        return
+
+    # Pilih fee mode
+    fee_mode = "cheap"
+    if questionary:
+        fee_mode = questionary.select("Mode biaya gas:", choices=["cheap", "normal", "fast"]).ask() or "cheap"
+    else:
+        ans = input("Mode fee [cheap/normal/fast] (default cheap): ").strip().lower()
+        if ans in ("cheap", "normal", "fast"):
+            fee_mode = ans
+
+    # Pilih chain dari eligible saja (ALL / multi / single)
+    if questionary:
+        choices = [{"name": "ALL ELIGIBLE", "value": "__ALL__"}] + [{"name": c, "value": c} for c in eligible]
+        sel = questionary.checkbox("Pilih chain untuk deploy:", choices=choices).ask()
+        if not sel:
+            print_warning("Tidak ada chain dipilih."); return
+        chains = eligible if "__ALL__" in sel else sel
+    else:
+        print_info("Ketik 'all' untuk semua eligible, atau pilih pisah koma.")
+        ans = input(f"Eligible: {', '.join(eligible)}\nPilih: ").strip().lower()
+        chains = eligible if ans in ("all", "*") else [x.strip() for x in ans.split(",") if x.strip() in eligible]
+        if not chains:
+            print_warning("Tidak ada chain valid yang dipilih."); return
+
+    # Deploy batch
     total = len(chains)
     ok = 0
     for i, ck in enumerate(chains, 1):
         local_progress(i - 1, total, prefix="Progres")
-        success, _ = _deploy_on_chain(ck, sink, pk)
+        success, _ = _deploy_on_chain(ck, sink, pk, fee_mode=fee_mode)
         if success:
             ok += 1
         local_progress(i, total, prefix="Progres")
@@ -416,31 +529,44 @@ def deploy_delegate_interactive():
         ("Dipilih", str(total)),
         ("Berhasil", str(ok)),
         ("Gagal", str(total - ok)),
-        ("Sink", sink),
+        ("Sink", mask_middle(sink, 6, 6, 5)),
+        ("Fee mode", fee_mode),
     ])
 
-def _tx_template(chain_key, builder_fn, gas=200000):
+# ---------- TX helpers (tidak diubah) ----------
+def _tx_template(chain_key, builder_fn, gas=200000, fee_mode=None, gas_buffer=None):
     """Helper untuk call tx ke kontrak yang sudah ada."""
-    w3, chain_id = connect_chain(chain_key)
+    w3, chain_id, info = connect_chain(chain_key)
     if not w3: return False
     abi, _ = compile_contract()
     if not abi: return False
+
+    decimals, symbol, threshold, fee_mode_default, gas_buffer_default = _get_chain_meta(info)
+    fee_mode = fee_mode or fee_mode_default or os.getenv("FEE_MODE", "cheap")
+    gas_buffer = gas_buffer or gas_buffer_default
+
     pk = prompt_pk()
     if not pk: return False
     acct = Account.from_key(pk)
+
     caddr, fn = builder_fn(w3, abi)  # return (contract_addr, function)
-    tx = fn.build_transaction({
-        "from": acct.address,
-        "nonce": w3.eth.get_transaction_count(acct.address),
-        "chainId": chain_id,
-        "gas": gas,
-        **_guess_fees(w3),
-    })
-    signed = acct.sign_transaction(tx)
-    tx_hash = _send_raw_tx(w3, signed)
-    print_info(f"[{chain_key}] Tx: {tx_hash.hex()}")
-    receipt = w3.eth.wait_for_transaction_receipt(tx_hash)
-    return receipt.status == 1
+
+    # estimate + buffer + fee
+    def _gas_func():
+        fn_builder = lambda txparams: fn.build_transaction(txparams)
+        est = lambda: fn.estimate_gas({"from": acct.address})
+        return fn_builder, est
+
+    try:
+        tx = _build_estimated_tx(w3, acct, chain_id, _gas_func, fee_mode, gas_buffer)
+        signed = acct.sign_transaction(tx)
+        tx_hash = _send_raw_tx(w3, signed)
+        print_info(f"[{chain_key}] Tx: {tx_hash.hex()}")
+        receipt = w3.eth.wait_for_transaction_receipt(tx_hash)
+        return receipt.status == 1
+    except Exception as e:
+        print_error(f"[{chain_key}] Gagal kirim tx: {e}")
+        return False
 
 def call_set_sink(chain_key, contract_addr, new_sink):
     return _tx_template(chain_key,
@@ -486,7 +612,7 @@ def menu_delegate():
     while True:
         menu = [
             f"{Colors.CYAN}1){Colors.ENDC} Atur Wallet Penampung (Sink default)",
-            f"{Colors.CYAN}2){Colors.ENDC} Buat Wallet Delegate (Single/Multi Chain)",
+            f"{Colors.CYAN}2){Colors.ENDC} Buat Wallet Delegate (Cek saldo → pilih eligible)",
             f"{Colors.CYAN}3){Colors.ENDC} Daftar Wallet Delegate",
             f"{Colors.CYAN}4){Colors.ENDC} Nonaktifkan/Aktifkan Delegate (Pause/Unpause)",
             f"{Colors.CYAN}5){Colors.ENDC} Ubah Sink pada Delegate",
@@ -502,7 +628,7 @@ def menu_delegate():
                 "Pilih menu:",
                 choices=[
                     QChoice("1) Atur Sink default", "1"),
-                    QChoice("2) Buat Delegate (Single/Multi)", "2"),
+                    QChoice("2) Buat Delegate (cek saldo & filter)", "2"),
                     QChoice("3) Daftar Delegate", "3"),
                     QChoice("4) Pause/Unpause", "4"),
                     QChoice("5) Ubah Sink", "5"),
@@ -542,7 +668,6 @@ def menu_delegate():
 
             items = rules[ck]
             labels = [f"{i+1}. {it['contract']}" for i, it in enumerate(items)]
-            idx = 0
             if questionary:
                 sel = questionary.select("Pilih kontrak:", choices=labels).ask()
                 idx = labels.index(sel)
