@@ -589,11 +589,45 @@ def call_sweep(chain_key, contract_addr):
         gas=150000)
 
 # ---------- UI ----------
+import shutil
+
+def _term_size():
+    try:
+        sz = shutil.get_terminal_size(fallback=(100, 28))
+        return max(sz.columns, 60), max(sz.lines, 20)
+    except Exception:
+        return 100, 28
+
+def _print_box_paged(title, lines, color):
+    """Tampilkan box panjang per halaman agar tidak ketiban UI."""
+    cols, rows = _term_size()
+    # sisakan beberapa baris untuk border dan prompt
+    page_h = max(rows - 6, 10)
+    total = len(lines)
+    i = 0
+    page = 1
+    while i < total:
+        chunk = lines[i:i+page_h]
+        # render judul dengan nomor halaman
+        box_title = f"{title}  (hal {page}/{(total+page_h-1)//page_h})"
+        print_box(box_title, chunk, color)
+        i += page_h
+        page += 1
+        if i < total:
+            try:
+                input(f"{Colors.YELLOW}Tekan Enter untuk lanjut (q untuk keluar)...{Colors.ENDC}")
+            except EOFError:
+                return
+            except KeyboardInterrupt:
+                return
+
 def list_delegates():
     rules = load_json(RULES_FILE, {})
-    if not rules or all(k == "default_sink" for k in rules.keys()):
+    items_exist = any(k != "default_sink" for k in rules.keys())
+    if not rules or not items_exist:
         print_warning("Belum ada delegate terdaftar.")
         return
+
     lines = []
     for chain_key, items in rules.items():
         if chain_key == "default_sink":
@@ -605,7 +639,9 @@ def list_delegates():
             lines.append(f"     Owner   : {it['owner']}")
             lines.append(f"     Dibuat  : {it.get('created_at','-')}")
         lines.append("")
-    print_box("📜 DAFTAR WALLET DELEGATE", lines, Colors.BLUE)
+
+    # tampilkan per-halaman agar tidak ketiban UI
+    _print_box_paged("📜 DAFTAR WALLET DELEGATE", lines, Colors.BLUE)
 
 def set_global_sink():
     select_sink_default()
