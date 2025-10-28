@@ -206,15 +206,6 @@
     "rpc_url": "https://astar-mainnet.g.alchemy.com/v2/${ALCHEMY_API_KEY}",
     "evm": true
   },
-  "aurora": {
-    "name": "Aurora",
-    "native_symbol": "AURORA",
-    "decimals": 18,
-    "threshold_native": 0.5,
-    "reserve_native": 0.1,
-    "rpc_url": "https://aurora-mainnet.g.alchemy.com/v2/${ALCHEMY_API_KEY}",
-    "evm": true
-  },
   "bob": {
     "name": "BOB",
     "native_symbol": "ETH",
