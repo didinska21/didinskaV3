@@ -149,6 +149,26 @@ contract DelegateWallet {
     }
 }
 """
+# === Screen helpers (tempel setelah import) ===
+def clear_screen():
+    """
+    Bersihkan layar terminal agar tampilan selalu 'satu layar'.
+    Bekerja di Linux/macOS/Windows + ANSI.
+    """
+    try:
+        # ANSI reset (cepat, tidak berkedip)
+        print("\033c", end="")
+    except Exception:
+        pass
+    # Fallback OS command
+    os.system("cls" if os.name == "nt" else "clear")
+
+def pause_back(msg="Tekan Enter untuk kembali..."):
+    """Pause sebelum kembali ke menu sebelumnya."""
+    try:
+        input(f"{Colors.YELLOW}{msg}{Colors.ENDC}")
+    except (EOFError, KeyboardInterrupt):
+        pass
 
 # ---------- Masker & Progress ----------
 def mask_middle(s: str, head: int = 6, tail: int = 6, stars: int = 5) -> str:
