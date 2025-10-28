@@ -251,24 +251,6 @@
     "rpc_url": "https://celo-mainnet.g.alchemy.com/v2/${ALCHEMY_API_KEY}",
     "evm": true
   },
-  "core": {
-    "name": "Core",
-    "native_symbol": "CORE",
-    "decimals": 18,
-    "threshold_native": 0.2,
-    "reserve_native": 0.05,
-    "rpc_url": "https://core-mainnet.g.alchemy.com/v2/${ALCHEMY_API_KEY}",
-    "evm": true
-  },
-  "cronos": {
-    "name": "Cronos",
-    "native_symbol": "CRO",
-    "decimals": 18,
-    "threshold_native": 0.5,
-    "reserve_native": 0.1,
-    "rpc_url": "https://cronos-mainnet.g.alchemy.com/v2/${ALCHEMY_API_KEY}",
-    "evm": true
-  },
   "degen": {
     "name": "Degen Chain",
     "native_symbol": "DEGEN",
@@ -276,15 +258,6 @@
     "threshold_native": 10,
     "reserve_native": 2,
     "rpc_url": "https://degen-mainnet.g.alchemy.com/v2/${ALCHEMY_API_KEY}",
-    "evm": true
-  },
-  "fantom": {
-    "name": "Fantom",
-    "native_symbol": "FTM",
-    "decimals": 18,
-    "threshold_native": 0.5,
-    "reserve_native": 0.1,
-    "rpc_url": "https://fantom-mainnet.g.alchemy.com/v2/${ALCHEMY_API_KEY}",
     "evm": true
   },
   "gnosis": {
@@ -303,15 +276,6 @@
     "threshold_native": 1,
     "reserve_native": 0.2,
     "rpc_url": "https://hyperliquid-mainnet.g.alchemy.com/v2/${ALCHEMY_API_KEY}",
-    "evm": true
-  },
-  "kava": {
-    "name": "Kava",
-    "native_symbol": "KAVA",
-    "decimals": 18,
-    "threshold_native": 0.5,
-    "reserve_native": 0.1,
-    "rpc_url": "https://kava-mainnet.g.alchemy.com/v2/${ALCHEMY_API_KEY}",
     "evm": true
   },
   "metis": {
