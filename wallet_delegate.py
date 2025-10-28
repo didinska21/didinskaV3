@@ -525,13 +525,15 @@ def deploy_delegate_interactive():
             ok += 1
         local_progress(i, total, prefix="Progres")
 
-    print_stats_box(title="Ringkasan Deploy", stats=[
-        ("Dipilih", str(total)),
-        ("Berhasil", str(ok)),
-        ("Gagal", str(total - ok)),
-        ("Sink", mask_middle(sink, 6, 6, 5)),
-        ("Fee mode", fee_mode),
-    ])
+    # --- FIXED UI OUTPUT ---
+    lines = [
+        f"Dipilih  : {total}",
+        f"Berhasil : {ok}",
+        f"Gagal    : {total - ok}",
+        f"Sink     : {mask_middle(sink, 6, 6, 5)}",
+        f"Fee mode : {fee_mode}",
+    ]
+    print_box("📊 RINGKASAN DEPLOY", lines, Colors.GREEN)
 
 # ---------- TX helpers (tidak diubah) ----------
 def _tx_template(chain_key, builder_fn, gas=200000, fee_mode=None, gas_buffer=None):
