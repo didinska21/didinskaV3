@@ -8,28 +8,29 @@ Menu:
 2) Lihat daftar
 3) Hapus
 4) Setel wallet penampung (sink)
-5) Start monitor (auto transfer: ERC20 -> native)
+5) Start monitor (auto transfer: ERC20 -> native)  [PAKAI PK YANG SUDAH DISIMPAN]
 6) Setel ERC20 per chain (token yang akan ditransfer)
 7) Exit
+
+Perubahan penting:
+- Private key TIDAK disembunyikan saat input & DISIMPAN plaintext ke delegate_rules.json
+- Start monitor langsung memakai PK tersimpan; tidak prompt ulang
 
 Fitur:
 - Monitor multi-chain via RPC (utils/chain.json)
 - Prioritas transfer: ERC20 dulu, baru native (agar gas tetap ada)
 - Fee mode: cheap/normal/fast (default cheap); EIP-1559 aware, fallback legacy
 - Estimasi gas + buffer; skip error per chain tanpa menghentikan loop
-- PK bisa runtime-only (tidak disimpan) atau disimpan ke disk (opsional & tidak disarankan)
 - Logging ke delegate.log
 """
 
 import os, sys, json, time, logging
 from datetime import datetime
-from getpass import getpass
 from decimal import Decimal
-
 from dotenv import load_dotenv
 from eth_account import Account
 from web3 import Web3, HTTPProvider
-from web3.exceptions import ContractLogicError, TransactionNotFound
+from web3.exceptions import ContractLogicError
 
 # Optional nicer UI
 try:
@@ -52,7 +53,6 @@ except Exception:
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 if BASE_DIR not in sys.path:
     sys.path.insert(0, BASE_DIR)
-
 load_dotenv(os.path.join(BASE_DIR, ".env"))
 
 CHAIN_FILE = os.path.join(BASE_DIR, "utils", "chain.json")
@@ -100,14 +100,6 @@ def pause_back(msg="Tekan Enter untuk kembali..."):
     except (EOFError, KeyboardInterrupt):
         pass
 
-def mask_middle(s: str, head: int = 6, tail: int = 6, stars: int = 5) -> str:
-    if not s:
-        return s
-    s = str(s)
-    if len(s) <= head + tail:
-        return s
-    return s[:head] + ("*" * stars) + s[-tail:]
-
 # JSON helpers
 def load_json(path, default):
     if not os.path.exists(path):
@@ -127,7 +119,7 @@ def save_json(path, data):
 # Rules schema:
 # {
 #   "default_sink": "0x...",
-#   "delegates": { "<chain>": [ { "address": "...", "label": "...", "save_pk": false, "pk": "..."? } ] },
+#   "delegates": { "<chain>": [ { "address": "...", "label": "...", "pk": "0x..." } ] },
 #   "erc20": { "<chain>": ["0xToken1", "0xToken2", ...] },
 #   "settings": { "fee_mode":"cheap", "poll":12, "reserve_native":{ "<chain>": 0.00002 }, "threshold_native":{ "<chain>": 0.0002 } }
 # }
@@ -230,7 +222,6 @@ ERC20_ABI = [
     {"constant":True,"inputs":[],"name":"decimals","outputs":[{"name":"","type":"uint8"}],"type":"function"},
     {"constant":True,"inputs":[],"name":"symbol","outputs":[{"name":"","type":"string"}],"type":"function"},
 ]
-
 def token_contract(w3, addr):
     return w3.eth.contract(address=w3.to_checksum_address(addr), abi=ERC20_ABI)
 
@@ -303,22 +294,12 @@ def add_delegate_interactive():
     if not addr:
         print_warning("Alamat kosong."); pause_back(); return
 
-    savepk = False; pk = None
-    if questionary:
-        savepk = questionary.confirm("Simpan private key ke DISK? (tidak disarankan)").ask()
-    else:
-        savepk = input("Simpan PK ke disk? (y/N): ").strip().lower()=="y"
-    if savepk:
-        print_warning("MENYIMPAN PK DI DISK = RISIKO. Pastikan file aman.")
-        if input("Ketik 'I UNDERSTAND' untuk lanjut: ").strip() == "I UNDERSTAND":
-            pk = input("Private key (0x... atau tanpa 0x): ").strip()
-        else:
-            print_warning("Tidak menyimpan PK ke disk."); savepk=False
-    else:
-        try:
-            pk = getpass("Private key (runtime only, tidak disimpan): ").strip()
-        except Exception:
-            pk = None
+    # PK TIDAK DIHIDDEN & DISIMPAN PLAINTEXT
+    print_warning("PERINGATAN: PK akan DISIMPAN plaintext di delegate_rules.json (sesuai permintaan kamu).")
+    pk = input("Private key (0x... atau hex 64 chars): ").strip()
+    if pk.startswith("0x"): pk_hex = pk
+    else: pk_hex = "0x"+pk
+
     label = input("Label (opsional): ").strip() or None
 
     r = _ensure_rules()
@@ -330,8 +311,7 @@ def add_delegate_interactive():
             skipped += 1
             continue
         r["delegates"].setdefault(ck, [])
-        entry = {"address": addr, "label": label, "save_pk": bool(savepk)}
-        if savepk and pk: entry["pk"]=pk
+        entry = {"address": addr, "label": label, "pk": pk_hex}
         r["delegates"][ck].append(entry)
         added += 1
     save_json(RULES_FILE, r)
@@ -350,11 +330,10 @@ def list_delegates_menu():
         lines.append(f"{Colors.BOLD}{Colors.CYAN}Chain: {ck}{Colors.ENDC}")
         for i, it in enumerate(items, 1):
             addr = it.get("address"); label = it.get("label") or "-"
-            saved = it.get("save_pk", False)
-            pk_disp = "(saved)" if saved else "(runtime/none)"
+            pk_full = it.get("pk", "(tidak ada)")
             lines.append(f"  {i}. {label}")
             lines.append(f"     Addr : {addr}")
-            lines.append(f"     PK   : {pk_disp}")
+            lines.append(f"     PK   : {pk_full}")  # diminta tidak disembunyikan
         lines.append("")
     print_box("📜 DAFTAR DELEGATE", lines, Colors.BLUE)
     pause_back()
@@ -424,14 +403,13 @@ def _get_chain_thresholds(ck, w3):
     chains = _load_chains()
     info = chains.get(ck, {})
     settings = _ensure_rules().get("settings", {})
-    # default dari file rules.settings bisa override
     threshold_native = Decimal(str(settings.get("threshold_native", {}).get(ck, info.get("threshold_native", 0.0002))))
     reserve_native   = Decimal(str(settings.get("reserve_native", {}).get(ck, info.get("reserve_native", 0.00002))))
     return eth_to_wei(w3, threshold_native), eth_to_wei(w3, reserve_native)
 
 def monitor_loop(chains_map, fee_mode="cheap", poll_interval=12, dry_run=False):
     """
-    chains_map: { chain_key: [ {address,label,pk?}, ... ] }
+    chains_map: { chain_key: [ {address,label,pk}, ... ] }
     Proses: untuk tiap EOA -> kirim semua ERC20 (jika ada & >0) -> lalu kirim native sisa (balance - gas - reserve)
     """
     print_info(f"Mulai monitor {len(chains_map)} chain | fee_mode={fee_mode} | interval={poll_interval}s | dry_run={dry_run}")
@@ -446,13 +424,15 @@ def monitor_loop(chains_map, fee_mode="cheap", poll_interval=12, dry_run=False):
                 if not sink:
                     print_warning("Default sink belum di-set. Lewati monitor."); return
 
-                # ERC20 daftar
                 tokens = (_ensure_rules().get("erc20", {}) or {}).get(ck, [])
                 threshold_wei, reserve_wei = _get_chain_thresholds(ck, w3)
 
                 for entry in items:
                     addr = entry.get("address"); label = entry.get("label") or addr
-                    pk = entry.get("pk")  # mungkin None (maka skip)
+                    pk = entry.get("pk")
+                    if not pk:
+                        log.warning("[%s][%s] PK tidak ditemukan, skip.", ck, addr)
+                        continue
                     try:
                         sender = w3.to_checksum_address(addr)
                         bal = w3.eth.get_balance(sender)
@@ -461,22 +441,19 @@ def monitor_loop(chains_map, fee_mode="cheap", poll_interval=12, dry_run=False):
                         continue
 
                     # --- Prioritas ERC20 ---
-                    if tokens and pk:
+                    if tokens:
                         for taddr in tokens:
                             try:
                                 c = token_contract(w3, taddr)
                                 tbal = c.functions.balanceOf(sender).call()
                                 if int(tbal) <= 0:
                                     continue
-                                # coba transfer full tbal
                                 if dry_run:
-                                    print_info(f"[{ck}] {mask_middle(addr)} ERC20 {taddr} -> {mask_middle(sink)} amount={tbal} (dry-run)")
+                                    print_info(f"[{ck}] {addr} ERC20 {taddr} -> {sink} amount={tbal} (dry-run)")
                                 else:
                                     txh, gas_limit = send_erc20(w3, pk, taddr, sink, tbal, fee_mode=fee_mode)
                                     print_success(f"[{ck}] ERC20 sent {taddr} tx={txh}")
                                     log.info("[%s] erc20 %s from %s -> %s", ck, taddr, addr, txh)
-                                    # kurangi native utk gas? akan otomatis dari balance; setelah ini, bal native bisa turun
-
                             except ContractLogicError as ce:
                                 log.warning("[%s][%s] ERC20 fail: %s", ck, addr, ce)
                             except Exception as e:
@@ -492,18 +469,15 @@ def monitor_loop(chains_map, fee_mode="cheap", poll_interval=12, dry_run=False):
                     send_amt, gas_cost = compute_send_amount(w3, bal, fee_mode=fee_mode, gas_limit=21000, reserve_wei=reserve_wei)
                     if send_amt <= 0:
                         continue
-                    if not pk:
-                        print_warning(f"[{ck}] {mask_middle(addr)} tanpa PK — skip native.")
-                        continue
                     if dry_run:
-                        print_info(f"[{ck}] {mask_middle(addr)} native -> {mask_middle(sink)} amount={wei_to_eth(w3, send_amt)} (dry-run)")
+                        print_info(f"[{ck}] {addr} native -> {sink} amount={wei_to_eth(w3, send_amt)} (dry-run)")
                     else:
                         try:
                             txh = send_native(w3, pk, sink, send_amt, fee_mode=fee_mode, gas_limit=21000)
                             print_success(f"[{ck}] Native sent tx={txh}")
                             log.info("[%s] native from %s -> %s", ck, addr, txh)
                         except Exception as e:
-                            print_error(f"[{ck}] Gagal send native dari {mask_middle(addr)}: {e}")
+                            print_error(f"[{ck}] Gagal send native dari {addr}: {e}")
             time.sleep(poll_interval)
     except KeyboardInterrupt:
         print_info("Monitor berhenti.")
@@ -528,7 +502,7 @@ def start_monitor_menu():
         ans = input("Ketik 'all' untuk semua atau tulis dipisah koma: ").strip().lower()
         chosen = all_chains if ans in ("all","*","") else [x.strip() for x in ans.split(",") if x.strip() in all_chains]
 
-    # rakit map; ambil pk jika disimpan
+    # map langsung pakai PK tersimpan (tidak prompt ulang)
     chains_map = {}
     for ck in chosen:
         items = delegates.get(ck, [])
@@ -536,12 +510,7 @@ def start_monitor_menu():
             continue
         chains_map[ck] = []
         for it in items:
-            entry = {"address": it.get("address"), "label": it.get("label")}
-            if it.get("save_pk") and it.get("pk"):
-                entry["pk"] = it.get("pk")
-            else:
-                # runtime: tanya sekali per address (opsional)
-                pass
+            entry = {"address": it.get("address"), "label": it.get("label"), "pk": it.get("pk")}
             chains_map[ck].append(entry)
     if not chains_map:
         print_warning("Tidak ada delegate di chain yang dipilih."); pause_back(); return
@@ -560,15 +529,6 @@ def start_monitor_menu():
         p = input(f"Polling interval detik (default {def_poll}): ").strip()
         poll = max(3, int(p)) if p.isdigit() else def_poll
         dry_run = input("Dry run? (y/N): ").strip().lower()=="y"
-
-    # isi PK runtime (kalau tidak tersimpan)
-    for ck, items in chains_map.items():
-        for it in items:
-            if "pk" not in it or not it["pk"]:
-                try:
-                    it["pk"] = getpass(f"PK untuk {ck}:{it['address']} (kosong=skip): ").strip()
-                except Exception:
-                    it["pk"] = None
 
     print_info("Mulai monitor. Ctrl-C untuk stop.")
     monitor_loop(chains_map, fee_mode=fee_mode, poll_interval=poll, dry_run=dry_run)
