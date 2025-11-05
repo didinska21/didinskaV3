@@ -341,29 +341,143 @@ def list_delegates_menu():
 def remove_delegate_menu():
     clear_screen()
     print_section_header("Hapus Delegate")
+
     r = _ensure_rules()
     delegates = r.get("delegates", {})
     if not delegates:
-        print_warning("Tidak ada data."); pause_back(); return
-    chains = list(delegates.keys())
+        print_warning("Tidak ada data delegate.")
+        pause_back(); return
+
+    # Pilih mode hapus: per-chain atau ALL CHAINS
+    mode = "single"
     if questionary:
-        ck = questionary.select("Pilih chain:", choices=chains).ask()
+        mode = questionary.select(
+            "Mode hapus:",
+            choices=[
+                QChoice("Hapus di satu chain", "single"),
+                QChoice("Hapus di SEMUA chain (All Chains)", "all"),
+            ],
+        ).ask() or "single"
     else:
-        print("Chains:", ", ".join(chains)); ck = input("Chain: ").strip()
-    items = delegates.get(ck, [])
-    if not items:
-        print_warning("Kosong."); pause_back(); return
-    labels = [f"{i+1}. {(it.get('label') or it.get('address'))}" for i,it in enumerate(items)]
+        m = input("Mode [single/all] (default single): ").strip().lower()
+        if m in ("single", "all"):
+            mode = m
+
+    # =============== MODE: SINGLE CHAIN (seperti sebelumnya) ===============
+    if mode == "single":
+        chains = list(delegates.keys())
+        if questionary:
+            ck = questionary.select("Pilih chain:", choices=chains).ask()
+        else:
+            print("Chains:", ", ".join(chains))
+            ck = input("Chain: ").strip()
+
+        items = delegates.get(ck, [])
+        if not items:
+            print_warning("Tidak ada delegate di chain tersebut.")
+            pause_back(); return
+
+        labels = [f"{i+1}. {(it.get('label') or it.get('address'))}" for i, it in enumerate(items)]
+        if questionary:
+            picked = questionary.checkbox("Pilih yang ingin dihapus:", choices=labels).ask() or []
+            to_del = set(int(x.split(".")[0]) - 1 for x in picked)
+        else:
+            print("\n".join(labels))
+            raw = input("Nomor (pisah koma): ").strip()
+            to_del = set(int(x) - 1 for x in raw.split(",") if x.strip().isdigit())
+
+        before = len(items)
+        delegates[ck] = [it for i, it in enumerate(items) if i not in to_del]
+        after = len(delegates[ck])
+        r["delegates"] = delegates
+        save_json(RULES_FILE, r)
+
+        print_success(f"Dihapus {before - after} entri dari chain {ck}.")
+        pause_back()
+        return
+
+    # =============== MODE: ALL CHAINS ===============
+    # Gabungkan by address agar bisa hapus cepat di semua chain
+    # mapping: addr_lower -> { "label": last_label, "chains": {ck: count} }
+    combined = {}
+    for ck, items in delegates.items():
+        for it in items:
+            addr = (it.get("address") or "").strip()
+            if not addr:
+                continue
+            key = addr.lower()
+            entry = combined.setdefault(key, {"address": addr, "label": it.get("label") or "-", "chains": {}})
+            entry["chains"][ck] = entry["chains"].get(ck, 0) + 1
+
+    if not combined:
+        print_warning("Tidak ada data yang bisa dihapus.")
+        pause_back(); return
+
+    # Buat daftar pilihan
+    display_items = []
+    for key, info in combined.items():
+        chains_str = ", ".join([f"{ck}×{cnt}" for ck, cnt in info["chains"].items()])
+        display_items.append(f"{info['address']}  |  {info['label']}  |  [{chains_str}]")
+
+    # Urutkan biar rapi
+    display_items.sort()
+
+    # Tambah opsi DELETE ALL (bahaya)
+    DANGER_ALL = "🔥 HAPUS SEMUA DELEGATE DI SEMUA CHAIN (DANGEROUS)"
     if questionary:
-        picked = questionary.checkbox("Pilih yang dihapus:", choices=labels).ask() or []
-        to_del = set(int(x.split(".")[0])-1 for x in picked)
+        choices = [DANGER_ALL] + display_items
+        picked = questionary.checkbox("Pilih address yang ingin dihapus di SEMUA chain:", choices=choices).ask() or []
     else:
-        print("\n".join(labels)); raw = input("Nomor (pisah koma): ").strip()
-        to_del = set(int(x)-1 for x in raw.split(",") if x.strip().isdigit())
-    delegates[ck] = [it for i,it in enumerate(items) if i not in to_del]
+        print_box("PILIH ADDRESS", display_items, Colors.BLUE)
+        print_warning("Ketik 'ALL' untuk hapus SEMUA address di SEMUA chain!")
+        raw = input("Ketik 'ALL' atau tempelkan address (pisah baris/comma): ").strip()
+        if raw.upper() == "ALL":
+            picked = [DANGER_ALL]
+        else:
+            picked = [x.strip() for x in raw.replace("\n", ",").split(",") if x.strip()]
+
+    # Konfirmasi
+    if not picked:
+        print_warning("Tidak ada yang dipilih.")
+        pause_back(); return
+
+    # Siapkan set address yang akan dihapus
+    to_delete_addrs = set()
+    if DANGER_ALL in picked:
+        # Konfirmasi ekstra
+        confirm = input("Ketik 'YES, DELETE ALL' untuk konfirmasi: ").strip()
+        if confirm != "YES, DELETE ALL":
+            print_warning("Batal hapus semua.")
+            pause_back(); return
+        # ambil semua address
+        to_delete_addrs = {info["address"].lower() for info in combined.values()}
+    else:
+        # parse dari display line -> ambil address di awal
+        for disp in picked:
+            addr = disp.split("|", 1)[0].strip()
+            if addr:
+                to_delete_addrs.add(addr.lower())
+
+        # Konfirmasi biasa
+        confirm = input(f"Konfirmasi hapus {len(to_delete_addrs)} address di SEMUA chain? (ketik YES): ").strip()
+        if confirm != "YES":
+            print_warning("Dibatalkan.")
+            pause_back(); return
+
+    # Lakukan penghapusan di semua chain
+    total_before = sum(len(v) for v in delegates.values())
+    for ck, items in list(delegates.items()):
+        delegates[ck] = [it for it in items if (it.get("address") or "").lower() not in to_delete_addrs]
+        # bersihkan chain kosong (optional)
+        if not delegates[ck]:
+            # boleh dibiarkan juga; kalau mau bersihkan:
+            # del delegates[ck]
+            pass
+
     r["delegates"] = delegates
     save_json(RULES_FILE, r)
-    print_success("Selesai.")
+    total_after = sum(len(v) for v in delegates.values())
+    print_success(f"Selesai. Terhapus {total_before - total_after} entri di semua chain.")
     pause_back()
 
 def set_default_sink_menu():
