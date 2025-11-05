@@ -1,32 +1,37 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-wallet_delegate.py - Off-chain Auto Transfer (Monitor Bot)
+wallet_delegate.py - Off-chain Auto Transfer (Monitor)
+
+Menu:
+1) Tambahkan wallet (EOA) ke chain (ambil dari utils/chain.json; yang error di-skip)
+2) Lihat daftar
+3) Hapus
+4) Setel wallet penampung (sink)
+5) Start monitor (auto transfer: ERC20 -> native)
+6) Setel ERC20 per chain (token yang akan ditransfer)
+7) Exit
 
 Fitur:
-- Monitor daftar EOA (private keys) pada multi-chain RPC (utils/chain.json)
-- Jika balance native > threshold + reserve -> kirim (balance - gas_cost - reserve) ke sink
-- Mode fee: cheap/normal/fast (default cheap), pakai feeHistory saat ada, fallback gas_price
-- Menu CLI interaktif (questionary optional), layar bersih, logging ke delegate.log
-- Private key disimpan hanya di memori (runtime) KECUALI user setuju simpan ke disk (berisiko).
+- Monitor multi-chain via RPC (utils/chain.json)
+- Prioritas transfer: ERC20 dulu, baru native (agar gas tetap ada)
+- Fee mode: cheap/normal/fast (default cheap); EIP-1559 aware, fallback legacy
+- Estimasi gas + buffer; skip error per chain tanpa menghentikan loop
+- PK bisa runtime-only (tidak disimpan) atau disimpan ke disk (opsional & tidak disarankan)
+- Logging ke delegate.log
 """
 
-import os
-import sys
-import json
-import time
-import logging
+import os, sys, json, time, logging
 from datetime import datetime
 from getpass import getpass
-from decimal import Decimal, getcontext
+from decimal import Decimal
 
 from dotenv import load_dotenv
 from eth_account import Account
 from web3 import Web3, HTTPProvider
+from web3.exceptions import ContractLogicError, TransactionNotFound
 
-getcontext().prec = 28  # presisi tinggi untuk perhitungan gas/saldo
-
-# ==== Optional UI (arrow/select) ====
+# Optional nicer UI
 try:
     import questionary
     from questionary import Choice as QChoice
@@ -34,7 +39,7 @@ except Exception:
     questionary = None
     QChoice = None
 
-# ==== POA middleware compat ====
+# POA middleware compat
 try:
     from web3.middleware import ExtraDataToPOAMiddleware as POA_MIDDLEWARE
 except Exception:
@@ -43,7 +48,7 @@ except Exception:
     except Exception:
         POA_MIDDLEWARE = None
 
-# ---- Paths & env ----
+# Paths
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 if BASE_DIR not in sys.path:
     sys.path.insert(0, BASE_DIR)
@@ -51,41 +56,37 @@ if BASE_DIR not in sys.path:
 load_dotenv(os.path.join(BASE_DIR, ".env"))
 
 CHAIN_FILE = os.path.join(BASE_DIR, "utils", "chain.json")
-RULES_FILE = os.path.join(BASE_DIR, "delegate_rules.json")   # menyimpan EOA yang dimonitor + sink
+RULES_FILE = os.path.join(BASE_DIR, "delegate_rules.json")
 LOG_FILE   = os.path.join(BASE_DIR, "delegate.log")
 
-# ---- Logging ----
+# Logging
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s | %(levelname)s | %(message)s",
-    handlers=[logging.FileHandler(LOG_FILE, encoding="utf-8"), logging.StreamHandler()]
+    handlers=[logging.FileHandler(LOG_FILE, encoding="utf-8"),
+              logging.StreamHandler()]
 )
 log = logging.getLogger("auto-transfer")
 
-# ---- UI/color helpers ----
+# UI fallbacks
 try:
     from utils.colors import Colors
-    from utils.ui import print_box, print_loader, print_stats_box, print_section_header, print_warning, print_error, print_success, print_info
+    from utils.ui import print_box, print_loader, print_section_header, print_warning, print_error, print_success, print_info
 except Exception:
     class Colors:
         YELLOW = "\033[93m"; GREEN = "\033[92m"; RED = "\033[91m"
-        CYAN = "\033[96m"; MAGENTA = "\033[95m"; BLUE = "\033[94m"
-        BOLD = "\033[1m"; ENDC = "\033[0m"
+        CYAN   = "\033[96m"; MAGENTA="\033[95m"; BLUE = "\033[94m"
+        BOLD   = "\033[1m";  ENDC = "\033[0m"
     def print_box(title, lines, color=None):
-        print(f"\n=== {title} ===")
-        for ln in lines: print(ln)
-        print("="*20)
-    def print_loader(msg, _secs=1): print(msg + " ...")
+        print(f"\n=== {title} ==="); [print(ln) for ln in lines]; print("="*20)
+    def print_loader(msg, _=1): print(msg+" ...")
     def print_section_header(t): print(f"\n{Colors.BOLD}{t}{Colors.ENDC}\n")
     def print_warning(msg): print(f"{Colors.YELLOW}[!] {msg}{Colors.ENDC}")
-    def print_error(msg): print(f"{Colors.RED}[ERROR] {msg}{Colors.ENDC}")
+    def print_error(msg):   print(f"{Colors.RED}[ERROR] {msg}{Colors.ENDC}")
     def print_success(msg): print(f"{Colors.GREEN}[OK] {msg}{Colors.ENDC}")
-    def print_info(msg): print(f"{Colors.CYAN}[i] {msg}{Colors.ENDC}")
-    def print_stats_box(title, stats):
-        lines = [f"{k:<14}: {v}" for k,v in stats]
-        print_box(title, lines, Colors.BLUE)
+    def print_info(msg):    print(f"{Colors.CYAN}[i] {msg}{Colors.ENDC}")
 
-# ---- Terminal helpers ----
+# Terminal helpers
 def clear_screen():
     try:
         print("\033c", end="")
@@ -94,23 +95,28 @@ def clear_screen():
     os.system("cls" if os.name == "nt" else "clear")
 
 def pause_back(msg="Tekan Enter untuk kembali..."):
-    try: input(f"{Colors.YELLOW}{msg}{Colors.ENDC}")
-    except (EOFError, KeyboardInterrupt): pass
+    try:
+        input(f"{Colors.YELLOW}{msg}{Colors.ENDC}")
+    except (EOFError, KeyboardInterrupt):
+        pass
 
 def mask_middle(s: str, head: int = 6, tail: int = 6, stars: int = 5) -> str:
-    if not s: return s
+    if not s:
+        return s
     s = str(s)
-    if len(s) <= head + tail: return s
+    if len(s) <= head + tail:
+        return s
     return s[:head] + ("*" * stars) + s[-tail:]
 
-# ---- JSON utils ----
+# JSON helpers
 def load_json(path, default):
-    if not os.path.exists(path): return default
+    if not os.path.exists(path):
+        return default
     try:
         with open(path, "r", encoding="utf-8") as f:
             return json.load(f)
     except Exception as e:
-        log.warning("Gagal load JSON %s: %s", path, e)
+        log.warning("Failed load JSON %s: %s", path, e)
         return default
 
 def save_json(path, data):
@@ -118,63 +124,45 @@ def save_json(path, data):
     with open(path, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2, ensure_ascii=False)
 
-# ---- Config helpers ----
+# Rules schema:
+# {
+#   "default_sink": "0x...",
+#   "delegates": { "<chain>": [ { "address": "...", "label": "...", "save_pk": false, "pk": "..."? } ] },
+#   "erc20": { "<chain>": ["0xToken1", "0xToken2", ...] },
+#   "settings": { "fee_mode":"cheap", "poll":12, "reserve_native":{ "<chain>": 0.00002 }, "threshold_native":{ "<chain>": 0.0002 } }
+# }
+def _ensure_rules():
+    r = load_json(RULES_FILE, {})
+    r.setdefault("delegates", {})
+    r.setdefault("erc20", {})
+    r.setdefault("settings", {})
+    return r
+
+# Chain config helper (support dict or list)
 def _load_chains():
     data = load_json(CHAIN_FILE, {})
     if isinstance(data, list):
         out = {}
         for item in data:
             k = item.get("key") or item.get("chain") or item.get("name")
-            if k: out[str(k)] = item
+            if k:
+                out[str(k)] = item
         return out
-    return data if isinstance(data, dict) else {}
+    elif isinstance(data, dict):
+        return data
+    return {}
 
-def _ensure_rules():
-    r = load_json(RULES_FILE, {})
-    r.setdefault("delegates", {})      # { chain_key: [{address, label, save_pk, pk?}] }
-    r.setdefault("default_sink", "")   # string
-    r.setdefault("settings", {})       # optional global settings
-    return r
-
-# ---- Web3 / fee helpers ----
-def _guess_fees(w3, mode="cheap"):
-    """EIP-1559 prefer, fallback gasPrice. Mode: cheap|normal|fast."""
-    mode = (mode or "cheap").lower()
-    if mode not in ("cheap", "normal", "fast"):
-        mode = "cheap"
-    try:
-        fh = w3.eth.fee_history(5, "latest", [10, 50, 90])
-        base = int(fh.baseFeePerGas[-1])
-        rewards = fh.reward[-1] if fh.reward else [w3.to_wei(1, "gwei")]
-        median_tip = int(sorted(rewards)[len(rewards)//2]) if rewards else w3.to_wei(1, "gwei")
-        if mode == "cheap":
-            tip = max(int(median_tip * 0.5), w3.to_wei(0.2, "gwei"))
-            max_fee = int(base * 1.15 + tip)
-        elif mode == "fast":
-            tip = max(int(median_tip * 2), w3.to_wei(2, "gwei"))
-            max_fee = int(base * 2 + tip)
-        else:
-            tip = max(median_tip, w3.to_wei(0.5, "gwei"))
-            max_fee = int(base * 1.3 + tip)
-        return {"maxFeePerGas": max_fee, "maxPriorityFeePerGas": tip}
-    except Exception:
-        # legacy
-        try: gp = int(w3.eth.gas_price)
-        except Exception: gp = int(w3.to_wei(3, "gwei"))
-        if mode == "cheap": gp = max(int(gp * 0.8), int(w3.to_wei(0.5, "gwei")))
-        elif mode == "fast": gp = int(gp * 1.5)
-        return {"gasPrice": gp}
-
+# Web3 connect
 def connect_chain(chain_key):
     chains = _load_chains()
     info = chains.get(chain_key)
     if not info:
-        print_error(f"Chain '{chain_key}' tidak ditemukan di {CHAIN_FILE}")
-        return None, None
+        print_warning(f"Chain '{chain_key}' tidak ada di chain.json (skip)")
+        return None, None, None
     rpc = info.get("rpc_url") or info.get("rpc")
     if not rpc:
-        print_error(f"RPC URL kosong untuk chain {chain_key}")
-        return None, None
+        print_warning(f"RPC kosong untuk {chain_key} (skip)")
+        return None, None, None
     alchemy = os.getenv("ALCHEMY_API_KEY")
     if "${ALCHEMY_API_KEY}" in str(rpc) and alchemy:
         rpc = rpc.replace("${ALCHEMY_API_KEY}", alchemy)
@@ -185,18 +173,68 @@ def connect_chain(chain_key):
     except Exception:
         pass
     if not w3.is_connected():
-        print_error(f"Gagal konek RPC: {chain_key}")
-        return None, None
-    return w3, info
+        print_warning(f"Gagal konek RPC {chain_key} (skip)")
+        return None, None, None
+    chain_id = info.get("chain_id") or info.get("chainId")
+    if not chain_id:
+        try:
+            chain_id = w3.eth.chain_id
+        except Exception:
+            chain_id = None
+    return w3, chain_id, info
 
-# ---- Unit helpers ----
-def wei_to_native(wei: int, decimals: int) -> Decimal:
-    return Decimal(wei) / (Decimal(10) ** Decimal(decimals))
+# Fees
+def _guess_fees(w3, mode="cheap"):
+    try:
+        fh = w3.eth.fee_history(5, "latest", [10, 50, 90])
+        base = int(fh.baseFeePerGas[-1])
+        rewards = fh.reward[-1] if fh.reward else [w3.to_wei(1, "gwei")]
+        median_tip = int(sorted(rewards)[len(rewards)//2]) if rewards else w3.to_wei(1, "gwei")
+        if mode == "fast":
+            tip = max(int(median_tip*2), w3.to_wei(2, "gwei")); max_fee = int(base*2 + tip)
+        elif mode == "normal":
+            tip = max(median_tip, w3.to_wei(0.5, "gwei"));      max_fee = int(base*1.3 + tip)
+        else:
+            tip = max(int(median_tip*0.5), w3.to_wei(0.2, "gwei")); max_fee = int(base*1.15 + tip)
+        return {"maxFeePerGas": max_fee, "maxPriorityFeePerGas": tip}
+    except Exception:
+        try:
+            gp = int(w3.eth.gas_price)
+        except Exception:
+            gp = int(w3.to_wei(3, "gwei"))
+        if mode == "fast": gp = int(gp*1.5)
+        elif mode == "cheap": gp = max(int(gp*0.8), int(w3.to_wei(0.5, "gwei")))
+        return {"gasPrice": gp}
 
-def native_to_wei(amount: Decimal, decimals: int) -> int:
-    return int(amount * (Decimal(10) ** Decimal(decimals)))
+def _send_raw_tx(w3, signed):
+    raw = getattr(signed, "raw_transaction", None) or getattr(signed, "rawTransaction", None)
+    if raw is None:
+        raw = signed if isinstance(signed, (bytes, bytearray)) else None
+    if raw is None:
+        raise ValueError("SignedTransaction raw tx missing")
+    return w3.eth.send_raw_transaction(raw)
 
-# ---- Amount calculation ----
+# Units
+def wei_to_eth(w3, v): 
+    try: return w3.from_wei(int(v), "ether")
+    except: return Decimal(v) / Decimal(10**18)
+
+def eth_to_wei(w3, v):
+    try: return w3.to_wei(Decimal(str(v)), "ether")
+    except: return int(Decimal(str(v)) * (10**18))
+
+# ERC20 minimal ABI
+ERC20_ABI = [
+    {"constant":True,"inputs":[{"name":"_owner","type":"address"}],"name":"balanceOf","outputs":[{"name":"balance","type":"uint256"}],"type":"function"},
+    {"constant":False,"inputs":[{"name":"_to","type":"address"},{"name":"_value","type":"uint256"}],"name":"transfer","outputs":[{"name":"","type":"bool"}],"type":"function"},
+    {"constant":True,"inputs":[],"name":"decimals","outputs":[{"name":"","type":"uint8"}],"type":"function"},
+    {"constant":True,"inputs":[],"name":"symbol","outputs":[{"name":"","type":"string"}],"type":"function"},
+]
+
+def token_contract(w3, addr):
+    return w3.eth.contract(address=w3.to_checksum_address(addr), abi=ERC20_ABI)
+
+# Compute native sendable after gas + reserve
 def compute_send_amount(w3, balance_wei, fee_mode="cheap", gas_limit=21000, reserve_wei=0):
     fees = _guess_fees(w3, mode=fee_mode)
     gp = fees.get("gasPrice") or fees.get("maxFeePerGas") or w3.to_wei(1, "gwei")
@@ -208,260 +246,372 @@ def compute_send_amount(w3, balance_wei, fee_mode="cheap", gas_limit=21000, rese
 
 def send_native(w3, pk, to_addr, value_wei, fee_mode="cheap", gas_limit=21000):
     acct = Account.from_key(pk)
-    nonce = w3.eth.get_transaction_count(acct.address)
     fees = _guess_fees(w3, mode=fee_mode)
     tx = {
         "from": acct.address,
         "to": w3.to_checksum_address(to_addr),
         "value": int(value_wei),
-        "nonce": nonce,
+        "nonce": w3.eth.get_transaction_count(acct.address),
         "gas": gas_limit,
-        **fees
     }
+    tx.update(fees)
     signed = acct.sign_transaction(tx)
-    raw = getattr(signed, "raw_transaction", None) or getattr(signed, "rawTransaction", None)
-    return w3.eth.send_raw_transaction(raw).hex()
+    txh = _send_raw_tx(w3, signed)
+    return txh.hex()
 
-# ---- Monitor loop ----
-def monitor_loop(chains_to_check, fee_mode="cheap", poll_interval=10, dry_run=False):
-    """
-    chains_to_check: dict { chain_key: [ {address, pk?, label?, reserve_native?} ] }
-    """
-    print_info(f"Mulai monitor {len(chains_to_check)} chain. Interval: {poll_interval}s. Fee: {fee_mode}. Dry run: {dry_run}")
+def send_erc20(w3, pk, token_addr, to_addr, amount_wei, fee_mode="cheap", gas_buffer=1.15):
+    acct = Account.from_key(pk)
+    c = token_contract(w3, token_addr)
+    fn = c.functions.transfer(w3.to_checksum_address(to_addr), int(amount_wei))
+    fees = _guess_fees(w3, mode=fee_mode)
     try:
-        while True:
-            for ck, delegates in chains_to_check.items():
-                w3, info = connect_chain(ck)
-                if not w3: continue
-                decimals = int(info.get("decimals", 18))
-                symbol   = info.get("native_symbol", "ETH")
-                threshold= Decimal(str(info.get("threshold_native", 0.0002)))
-                reserve  = Decimal(str(info.get("reserve_native", 0.00002)))
-                t_wei    = native_to_wei(threshold, decimals)
-                r_wei    = native_to_wei(reserve, decimals)
-                for d in delegates:
-                    addr  = d.get("address")
-                    label = d.get("label") or addr
-                    pk    = d.get("pk")  # bisa None (harus input di runtime)
-                    try:
-                        chksum = w3.to_checksum_address(addr)
-                        bal    = int(w3.eth.get_balance(chksum))
-                    except Exception as e:
-                        log.warning("[%s][%s] gagal get balance: %s", ck, addr, e); continue
-                    if bal <= t_wei:
-                        log.debug("[%s][%s] balance <= threshold", ck, addr); continue
-                    send_amt, gas_cost = compute_send_amount(w3, bal, fee_mode=fee_mode, gas_limit=21000, reserve_wei=r_wei)
-                    if send_amt <= 0:
-                        log.info("[%s][%s] saldo tidak cukup setelah gas+reserve", ck, addr); continue
-                    sink = _ensure_rules().get("default_sink")
-                    if not sink:
-                        print_warning("Default sink belum diset. Stop monitor."); return
-                    nat_bal = wei_to_native(bal, decimals)
-                    nat_amt = wei_to_native(send_amt, decimals)
-                    nat_gas = wei_to_native(gas_cost, decimals)
-                    print_info(f"[{ck}] {mask_middle(addr)} bal {nat_bal} {symbol} → kirim {nat_amt} (gas≈{nat_gas}) ke {mask_middle(sink)}")
-                    if dry_run: continue
-                    # pastikan pk tersedia
-                    if not pk:
-                        try:
-                            pk = getpass(f"PK untuk {addr} (runtime only): ").strip()
-                        except Exception:
-                            print_warning("PK tidak diberikan. Skip."); continue
-                    try:
-                        txh = send_native(w3, pk, sink, send_amt, fee_mode=fee_mode, gas_limit=21000)
-                        print_success(f"[{ck}] TX sent: {txh}")
-                        log.info("[%s] sent from %s -> %s value=%s", ck, addr, sink, nat_amt)
-                    except Exception as e:
-                        print_error(f"[{ck}] Gagal kirim dari {mask_middle(addr)}: {e}")
-                        log.exception("send error")
-            time.sleep(max(3, int(poll_interval)))
-    except KeyboardInterrupt:
-        print_info("Monitor dihentikan oleh user.")
+        est = fn.estimate_gas({"from": acct.address})
+        gas_limit = int(est * gas_buffer)
+    except Exception:
+        gas_limit = int(100000 * gas_buffer)
+    tx = fn.build_transaction({
+        "from": acct.address,
+        "nonce": w3.eth.get_transaction_count(acct.address),
+        "gas": gas_limit,
+        **fees,
+    })
+    signed = acct.sign_transaction(tx)
+    txh = _send_raw_tx(w3, signed)
+    return txh.hex(), gas_limit
 
-# ---- Menus ----
+# -------------------- MENU OPS --------------------
 def add_delegate_interactive():
-    clear_screen(); print_section_header("Tambah Delegate (EOA)")
+    clear_screen()
+    print_section_header("Tambah Wallet (EOA) ke Chain")
     chains_conf = _load_chains()
-    chains = list(chains_conf.keys())
-    if not chains:
-        print_error("Tidak ada chain di utils/chain.json"); pause_back(); return
-    ck = questionary.select("Pilih chain:", choices=chains).ask() if questionary else (print("Chains:", ", ".join(chains)) or input("Chain: ").strip())
-    if not ck: print_warning("Batal."); pause_back(); return
-    addr = input("Alamat wallet (EOA) yang dimonitor: ").strip()
-    if not addr: print_warning("Kosong."); pause_back(); return
+    all_keys = list(chains_conf.keys())
+    if not all_keys:
+        print_error("utils/chain.json kosong")
+        pause_back(); return
+
+    # pilih chain (ALL / multi)
+    if questionary:
+        choices = [{"name":"ALL CHAINS","value":"__ALL__"}] + [{"name":k,"value":k} for k in all_keys]
+        picked = questionary.checkbox("Pilih chain:", choices=choices).ask() or []
+        sel_chains = all_keys if (not picked or "__ALL__" in picked) else picked
+    else:
+        print("Chains:", ", ".join(all_keys))
+        ans = input("Ketik 'all' untuk semua atau tulis pilihan dipisah koma: ").strip().lower()
+        sel_chains = all_keys if ans in ("all","*","") else [x.strip() for x in ans.split(",") if x.strip() in all_keys]
+
+    addr = input("Alamat EOA: ").strip()
+    if not addr:
+        print_warning("Alamat kosong."); pause_back(); return
+
     savepk = False; pk = None
     if questionary:
         savepk = questionary.confirm("Simpan private key ke DISK? (tidak disarankan)").ask()
     else:
-        savepk = input("Simpan PK ke disk? (y/N): ").strip().lower() == "y"
+        savepk = input("Simpan PK ke disk? (y/N): ").strip().lower()=="y"
     if savepk:
-        print_warning("MENYIMPAN PK DI DISK = BERISIKO. Pastikan file aman.")
+        print_warning("MENYIMPAN PK DI DISK = RISIKO. Pastikan file aman.")
         if input("Ketik 'I UNDERSTAND' untuk lanjut: ").strip() == "I UNDERSTAND":
             pk = input("Private key (0x... atau tanpa 0x): ").strip()
         else:
-            print_warning("Tidak disimpan."); savepk = False
+            print_warning("Tidak menyimpan PK ke disk."); savepk=False
     else:
-        # runtime only
         try:
             pk = getpass("Private key (runtime only, tidak disimpan): ").strip()
         except Exception:
             pk = None
     label = input("Label (opsional): ").strip() or None
+
     r = _ensure_rules()
-    r["delegates"].setdefault(ck, [])
-    entry = {"address": addr, "label": label, "save_pk": bool(savepk)}
-    if savepk and pk: entry["pk"] = pk
-    r["delegates"][ck].append(entry)
+    added = 0; skipped = 0
+    for ck in sel_chains:
+        # validasi cepat RPC; kalau gagal -> skip
+        w3, _, _ = connect_chain(ck)
+        if not w3:
+            skipped += 1
+            continue
+        r["delegates"].setdefault(ck, [])
+        entry = {"address": addr, "label": label, "save_pk": bool(savepk)}
+        if savepk and pk: entry["pk"]=pk
+        r["delegates"][ck].append(entry)
+        added += 1
     save_json(RULES_FILE, r)
-    print_success("Delegate ditambahkan.")
+    print_success(f"Ditambahkan ke {added} chain. Skip: {skipped}.")
     pause_back()
 
 def list_delegates_menu():
-    clear_screen(); print_section_header("Daftar Delegates (EOA)")
-    r = _ensure_rules(); delegates = r.get("delegates", {})
+    clear_screen()
+    print_section_header("Daftar Delegates")
+    r = _ensure_rules()
+    delegates = r.get("delegates", {})
     if not delegates:
-        print_warning("Belum ada delegate."); pause_back(); return
-    lines = []
+        print_warning("Belum ada data."); pause_back(); return
+    lines=[]
     for ck, items in delegates.items():
         lines.append(f"{Colors.BOLD}{Colors.CYAN}Chain: {ck}{Colors.ENDC}")
         for i, it in enumerate(items, 1):
-            pk_state = "(saved)" if it.get("save_pk") and it.get("pk") else "(runtime)" if it.get("save_pk") else "-"
-            lines.append(f"  {i}. {it.get('label') or it['address']}")
-            lines.append(f"     Addr : {it['address']}")
-            lines.append(f"     PK   : {pk_state}")
+            addr = it.get("address"); label = it.get("label") or "-"
+            saved = it.get("save_pk", False)
+            pk_disp = "(saved)" if saved else "(runtime/none)"
+            lines.append(f"  {i}. {label}")
+            lines.append(f"     Addr : {addr}")
+            lines.append(f"     PK   : {pk_disp}")
         lines.append("")
     print_box("📜 DAFTAR DELEGATE", lines, Colors.BLUE)
     pause_back()
 
 def remove_delegate_menu():
-    clear_screen(); print_section_header("Hapus Delegate")
-    r = _ensure_rules(); delegates = r.get("delegates", {})
-    if not delegates:
-        print_warning("Tidak ada delegate."); pause_back(); return
-    chains = list(delegates.keys())
-    ck = questionary.select("Pilih chain:", choices=chains).ask() if questionary else (print("Chains:", ", ".join(chains)) or input("Chain: ").strip())
-    items = delegates.get(ck, [])
-    if not items:
-        print_warning("Tidak ada delegate di chain itu."); pause_back(); return
-    labels = [f"{i+1}. {it.get('label') or it['address']}" for i,it in enumerate(items)]
-    if questionary:
-        pick = questionary.checkbox("Pilih yang dihapus:", choices=labels).ask() or []
-        idxs = set(int(x.split(".")[0]) - 1 for x in pick)
-    else:
-        print("\n".join(labels)); raw = input("Nomor (pisah koma): ").strip(); idxs = set(int(x)-1 for x in raw.split(",") if x.strip().isdigit())
-    delegates[ck] = [it for i,it in enumerate(items) if i not in idxs]
-    r["delegates"] = delegates; save_json(RULES_FILE, r)
-    print_success("Perubahan disimpan."); pause_back()
-
-def set_default_sink_menu():
-    clear_screen(); print_section_header("Set Default Sink")
-    r = _ensure_rules(); cur = r.get("default_sink", "")
-    sink = input(f"Sink address [{cur}]: ").strip() or cur
-    r["default_sink"] = sink; save_json(RULES_FILE, r)
-    print_success("Default sink tersimpan."); pause_back()
-
-def start_monitor_menu():
-    clear_screen(); print_section_header("Start Monitor")
+    clear_screen()
+    print_section_header("Hapus Delegate")
     r = _ensure_rules()
     delegates = r.get("delegates", {})
     if not delegates:
-        print_warning("Tidak ada delegate. Tambah dulu."); pause_back(); return
-    # Susun map chain -> list entries (ambil pk jika tersimpan)
+        print_warning("Tidak ada data."); pause_back(); return
+    chains = list(delegates.keys())
+    if questionary:
+        ck = questionary.select("Pilih chain:", choices=chains).ask()
+    else:
+        print("Chains:", ", ".join(chains)); ck = input("Chain: ").strip()
+    items = delegates.get(ck, [])
+    if not items:
+        print_warning("Kosong."); pause_back(); return
+    labels = [f"{i+1}. {(it.get('label') or it.get('address'))}" for i,it in enumerate(items)]
+    if questionary:
+        picked = questionary.checkbox("Pilih yang dihapus:", choices=labels).ask() or []
+        to_del = set(int(x.split(".")[0])-1 for x in picked)
+    else:
+        print("\n".join(labels)); raw = input("Nomor (pisah koma): ").strip()
+        to_del = set(int(x)-1 for x in raw.split(",") if x.strip().isdigit())
+    delegates[ck] = [it for i,it in enumerate(items) if i not in to_del]
+    r["delegates"] = delegates
+    save_json(RULES_FILE, r)
+    print_success("Selesai.")
+    pause_back()
+
+def set_default_sink_menu():
+    clear_screen()
+    print_section_header("Set Wallet Penampung (Sink)")
+    r = _ensure_rules()
+    cur = r.get("default_sink","")
+    sink = input(f"Sink address [{cur}]: ").strip() or cur
+    r["default_sink"] = sink
+    save_json(RULES_FILE, r)
+    print_success("Disimpan.")
+    pause_back()
+
+def set_erc20_menu():
+    clear_screen()
+    print_section_header("Setel ERC20 Per Chain")
+    r = _ensure_rules()
+    chains = list(_load_chains().keys())
+    if not chains:
+        print_warning("Chain.json kosong."); pause_back(); return
+    if questionary:
+        ck = questionary.select("Pilih chain:", choices=chains).ask()
+    else:
+        print("Chains:", ", ".join(chains)); ck = input("Chain: ").strip()
+    cur = (r.get("erc20", {}) or {}).get(ck, [])
+    print_info(f"Daftar token saat ini: {', '.join(cur) if cur else '(kosong)'}")
+    raw = input("Masukkan alamat token ERC20 (pisah koma), kosongkan untuk hapus semua: ").strip()
+    newlist = [t.strip() for t in raw.split(",") if t.strip()] if raw else []
+    r["erc20"].setdefault(ck, [])
+    r["erc20"][ck] = newlist
+    save_json(RULES_FILE, r)
+    print_success("ERC20 diperbarui.")
+    pause_back()
+
+# -------------------- MONITOR --------------------
+def _get_chain_thresholds(ck, w3):
+    chains = _load_chains()
+    info = chains.get(ck, {})
+    settings = _ensure_rules().get("settings", {})
+    # default dari file rules.settings bisa override
+    threshold_native = Decimal(str(settings.get("threshold_native", {}).get(ck, info.get("threshold_native", 0.0002))))
+    reserve_native   = Decimal(str(settings.get("reserve_native", {}).get(ck, info.get("reserve_native", 0.00002))))
+    return eth_to_wei(w3, threshold_native), eth_to_wei(w3, reserve_native)
+
+def monitor_loop(chains_map, fee_mode="cheap", poll_interval=12, dry_run=False):
+    """
+    chains_map: { chain_key: [ {address,label,pk?}, ... ] }
+    Proses: untuk tiap EOA -> kirim semua ERC20 (jika ada & >0) -> lalu kirim native sisa (balance - gas - reserve)
+    """
+    print_info(f"Mulai monitor {len(chains_map)} chain | fee_mode={fee_mode} | interval={poll_interval}s | dry_run={dry_run}")
+    try:
+        while True:
+            for ck, items in chains_map.items():
+                w3, _, _ = connect_chain(ck)
+                if not w3:
+                    continue
+                # sink
+                sink = _ensure_rules().get("default_sink")
+                if not sink:
+                    print_warning("Default sink belum di-set. Lewati monitor."); return
+
+                # ERC20 daftar
+                tokens = (_ensure_rules().get("erc20", {}) or {}).get(ck, [])
+                threshold_wei, reserve_wei = _get_chain_thresholds(ck, w3)
+
+                for entry in items:
+                    addr = entry.get("address"); label = entry.get("label") or addr
+                    pk = entry.get("pk")  # mungkin None (maka skip)
+                    try:
+                        sender = w3.to_checksum_address(addr)
+                        bal = w3.eth.get_balance(sender)
+                    except Exception as e:
+                        log.warning("[%s][%s] gagal get_balance: %s", ck, addr, e)
+                        continue
+
+                    # --- Prioritas ERC20 ---
+                    if tokens and pk:
+                        for taddr in tokens:
+                            try:
+                                c = token_contract(w3, taddr)
+                                tbal = c.functions.balanceOf(sender).call()
+                                if int(tbal) <= 0:
+                                    continue
+                                # coba transfer full tbal
+                                if dry_run:
+                                    print_info(f"[{ck}] {mask_middle(addr)} ERC20 {taddr} -> {mask_middle(sink)} amount={tbal} (dry-run)")
+                                else:
+                                    txh, gas_limit = send_erc20(w3, pk, taddr, sink, tbal, fee_mode=fee_mode)
+                                    print_success(f"[{ck}] ERC20 sent {taddr} tx={txh}")
+                                    log.info("[%s] erc20 %s from %s -> %s", ck, taddr, addr, txh)
+                                    # kurangi native utk gas? akan otomatis dari balance; setelah ini, bal native bisa turun
+
+                            except ContractLogicError as ce:
+                                log.warning("[%s][%s] ERC20 fail: %s", ck, addr, ce)
+                            except Exception as e:
+                                log.warning("[%s][%s] ERC20 error token %s: %s", ck, addr, taddr, e)
+
+                    # --- Lalu native (sisa) ---
+                    try:
+                        bal = w3.eth.get_balance(sender)  # refresh setelah ERC20 tx
+                    except Exception:
+                        continue
+                    if bal <= threshold_wei:
+                        continue
+                    send_amt, gas_cost = compute_send_amount(w3, bal, fee_mode=fee_mode, gas_limit=21000, reserve_wei=reserve_wei)
+                    if send_amt <= 0:
+                        continue
+                    if not pk:
+                        print_warning(f"[{ck}] {mask_middle(addr)} tanpa PK — skip native.")
+                        continue
+                    if dry_run:
+                        print_info(f"[{ck}] {mask_middle(addr)} native -> {mask_middle(sink)} amount={wei_to_eth(w3, send_amt)} (dry-run)")
+                    else:
+                        try:
+                            txh = send_native(w3, pk, sink, send_amt, fee_mode=fee_mode, gas_limit=21000)
+                            print_success(f"[{ck}] Native sent tx={txh}")
+                            log.info("[%s] native from %s -> %s", ck, addr, txh)
+                        except Exception as e:
+                            print_error(f"[{ck}] Gagal send native dari {mask_middle(addr)}: {e}")
+            time.sleep(poll_interval)
+    except KeyboardInterrupt:
+        print_info("Monitor berhenti.")
+
+def start_monitor_menu():
+    clear_screen()
+    print_section_header("Start Monitor (Auto Transfer)")
+    r = _ensure_rules()
+    delegates = r.get("delegates", {})
+    if not delegates:
+        print_warning("Tidak ada delegate. Tambahkan dulu.")
+        pause_back(); return
+
+    all_chains = list(delegates.keys())
+    # pilih chain (ALL / subset)
+    if questionary:
+        choices = [{"name":"ALL CHAINS","value":"__ALL__"}] + [{"name":ck,"value":ck} for ck in all_chains]
+        picked = questionary.checkbox("Monitor chain apa saja?", choices=choices).ask() or []
+        chosen = all_chains if (not picked or "__ALL__" in picked) else picked
+    else:
+        print("Chains:", ", ".join(all_chains))
+        ans = input("Ketik 'all' untuk semua atau tulis dipisah koma: ").strip().lower()
+        chosen = all_chains if ans in ("all","*","") else [x.strip() for x in ans.split(",") if x.strip() in all_chains]
+
+    # rakit map; ambil pk jika disimpan
     chains_map = {}
-    for ck, items in delegates.items():
+    for ck in chosen:
+        items = delegates.get(ck, [])
+        if not items:
+            continue
         chains_map[ck] = []
         for it in items:
             entry = {"address": it.get("address"), "label": it.get("label")}
-            if it.get("save_pk") and it.get("pk"): entry["pk"] = it.get("pk")
+            if it.get("save_pk") and it.get("pk"):
+                entry["pk"] = it.get("pk")
+            else:
+                # runtime: tanya sekali per address (opsional)
+                pass
             chains_map[ck].append(entry)
-    # opsi
-    fee_mode = "cheap"; interval = 12; dry_run = False
+    if not chains_map:
+        print_warning("Tidak ada delegate di chain yang dipilih."); pause_back(); return
+
+    # opsi runtime
+    settings = r.get("settings", {})
+    def_fee = settings.get("fee_mode","cheap")
+    def_poll = int(settings.get("poll", 12))
     if questionary:
-        fee_mode = questionary.select("Mode fee:", choices=["cheap","normal","fast"]).ask() or "cheap"
-        interval = int(questionary.text("Polling interval (detik):", default="12").ask())
-        dry_run  = questionary.confirm("Dry run? (hanya simulasi)").ask()
+        fee_mode = questionary.select("Mode fee:", choices=["cheap","normal","fast"]).ask() or def_fee
+        poll = int(questionary.text("Polling interval (detik):", default=str(def_poll)).ask())
+        dry_run = questionary.confirm("Dry run? (hanya simulasi)").ask()
     else:
-        m = input("Mode fee [cheap/normal/fast] (default cheap): ").strip().lower()
-        if m in ("cheap","normal","fast"): fee_mode = m
-        iv = input("Polling interval detik (default 12): ").strip()
-        if iv.isdigit(): interval = max(3, int(iv))
-        dry_run = input("Dry run? (y/N): ").strip().lower() == "y"
-    print_info("Mulai monitor. Tekan Ctrl-C untuk stop.")
-    monitor_loop(chains_map, fee_mode=fee_mode, poll_interval=interval, dry_run=dry_run)
+        fm = input(f"Mode fee [cheap/normal/fast] (default {def_fee}): ").strip().lower()
+        fee_mode = fm if fm in ("cheap","normal","fast") else def_fee
+        p = input(f"Polling interval detik (default {def_poll}): ").strip()
+        poll = max(3, int(p)) if p.isdigit() else def_poll
+        dry_run = input("Dry run? (y/N): ").strip().lower()=="y"
+
+    # isi PK runtime (kalau tidak tersimpan)
+    for ck, items in chains_map.items():
+        for it in items:
+            if "pk" not in it or not it["pk"]:
+                try:
+                    it["pk"] = getpass(f"PK untuk {ck}:{it['address']} (kosong=skip): ").strip()
+                except Exception:
+                    it["pk"] = None
+
+    print_info("Mulai monitor. Ctrl-C untuk stop.")
+    monitor_loop(chains_map, fee_mode=fee_mode, poll_interval=poll, dry_run=dry_run)
     pause_back()
 
-def manual_sweep_menu():
-    clear_screen(); print_section_header("Manual Sweep (sekali kirim)")
-    r = _ensure_rules(); delegates = r.get("delegates", {})
-    if not delegates:
-        print_warning("Tidak ada delegate."); pause_back(); return
-    chains = list(delegates.keys())
-    ck = questionary.select("Pilih chain:", choices=chains).ask() if questionary else (print("Chains:", ", ".join(chains)) or input("Chain: ").strip())
-    items = delegates.get(ck, [])
-    if not items: print_warning("Kosong."); pause_back(); return
-    labels = [f"{i+1}. {it.get('label') or it['address']}" for i,it in enumerate(items)]
-    if questionary:
-        sel = questionary.select("Pilih EOA:", choices=labels).ask(); idx = labels.index(sel)
-    else:
-        print("\n".join(labels)); idx = int(input("Nomor: ").strip()) - 1
-    it = items[idx]; addr = it.get("address"); saved_pk = it.get("pk") if it.get("save_pk") else None
-    w3, info = connect_chain(ck); 
-    if not w3: pause_back(); return
-    decimals = int(info.get("decimals", 18)); symbol = info.get("native_symbol","ETH")
-    bal = int(w3.eth.get_balance(w3.to_checksum_address(addr)))
-    print_info(f"Balance: {wei_to_native(bal, decimals)} {symbol}")
-    reserve = Decimal(str(info.get("reserve_native", 0.00002)))
-    send_amt, gas_cost = compute_send_amount(w3, bal, fee_mode="normal", gas_limit=21000, reserve_wei=native_to_wei(reserve, decimals))
-    if send_amt <= 0:
-        print_warning("Tidak cukup untuk gas + cadangan."); pause_back(); return
-    sink = _ensure_rules().get("default_sink")
-    if not sink:
-        print_warning("Default sink belum di-set."); pause_back(); return
-    print_info(f"Akan kirim {wei_to_native(send_amt, decimals)} {symbol} ke {mask_middle(sink)} (gas≈{wei_to_native(gas_cost, decimals)} {symbol})")
-    if input("Ketik 'yes' untuk konfirmasi: ").strip().lower() != "yes":
-        print_warning("Dibatalkan."); pause_back(); return
-    pk = saved_pk or getpass("Masukkan private key: ").strip()
-    try:
-        txh = send_native(w3, pk, sink, send_amt, fee_mode="normal", gas_limit=21000)
-        print_success(f"Tx sent: {txh}")
-    except Exception as e:
-        print_error(f"Gagal kirim: {e}")
-    pause_back()
-
-# ---- Main menu ----
+# -------------------- MAIN MENU --------------------
 def menu_main():
     while True:
         clear_screen()
-        print_section_header("AUTO TRANSFER (Monitor Bot) - MAIN MENU")
+        print_section_header("AUTO TRANSFER (Off-chain) - MAIN MENU")
         menu = [
-            "1) Tambah Delegate (EOA)",
-            "2) Daftar Delegate",
-            "3) Hapus Delegate",
-            "4) Set Default Sink",
-            "5) Start Monitor (auto transfer)",
-            "6) Manual Sweep (single EOA)",
-            "7) Exit"
+            "1) Tambahkan wallet (EOA) ke chain (ambil dari chain.json)",
+            "2) Lihat daftar",
+            "3) Hapus",
+            "4) Setel wallet penampung (sink)",
+            "5) Start monitor (auto transfer)",
+            "6) Setel ERC20 per chain",
+            "7) Exit",
         ]
         print_box("MENU", menu, Colors.MAGENTA)
-        ch = (questionary.select("Pilih:", choices=[QChoice(m, str(i+1)) for i,m in enumerate(menu)]).ask()
-              if questionary else input("Pilih (1-7): ").strip())
-        if ch in ("1", "1) Tambah Delegate (EOA)"): add_delegate_interactive()
-        elif ch in ("2",):  list_delegates_menu()
-        elif ch in ("3",):  remove_delegate_menu()
-        elif ch in ("4",):  set_default_sink_menu()
-        elif ch in ("5",):  start_monitor_menu()
-        elif ch in ("6",):  manual_sweep_menu()
-        elif ch in ("7", "Exit", None): print_info("Bye."); break
+        if questionary:
+            ch = questionary.select("Pilih:", choices=[QChoice(t, str(i+1)) for i,t in enumerate(menu)]).ask()
         else:
-            print_error("Pilihan tidak valid."); time.sleep(1)
+            ch = input("Pilih (1-7): ").strip()
 
-# ---- Entrypoint (biar bisa diimport & dipanggil dari main.py) ----
-def run():
-    try:
-        menu_main()
-    except Exception as e:
-        print_error(f"Runtime error: {e}")
-        log.exception("runtime error")
+        if ch in ("1", "1) Tambahkan wallet (EOA) ke chain (ambil dari chain.json)"):
+            add_delegate_interactive()
+        elif ch in ("2",):
+            list_delegates_menu()
+        elif ch in ("3",):
+            remove_delegate_menu()
+        elif ch in ("4",):
+            set_default_sink_menu()
+        elif ch in ("5",):
+            start_monitor_menu()
+        elif ch in ("6",):
+            set_erc20_menu()
+        elif ch in ("7",):
+            print_info("Bye.")
+            break
+        else:
+            print_error("Pilihan tidak valid.")
+            time.sleep(1)
 
 if __name__ == "__main__":
-    run()
+    menu_main()
