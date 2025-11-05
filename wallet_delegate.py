@@ -613,5 +613,10 @@ def menu_main():
             print_error("Pilihan tidak valid.")
             time.sleep(1)
 
+# ---- Entry aliases ----
+def run():
+    """Backward-compat: keep old launcher signature."""
+    menu_main()
+
 if __name__ == "__main__":
     menu_main()
