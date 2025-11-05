@@ -517,7 +517,7 @@ def _get_chain_thresholds(ck, w3):
     chains = _load_chains()
     info = chains.get(ck, {})
     settings = _ensure_rules().get("settings", {})
-    threshold_native = Decimal(str(settings.get("threshold_native", {}).get(ck, info.get("threshold_native", 0.0002))))
+    threshold_native = Decimal(str(settings.get("threshold_native", {}).get(ck, info.get("threshold_native", 0.00002))))
     reserve_native   = Decimal(str(settings.get("reserve_native", {}).get(ck, info.get("reserve_native", 0.00002))))
     return eth_to_wei(w3, threshold_native), eth_to_wei(w3, reserve_native)
 
