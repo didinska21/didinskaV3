@@ -238,6 +238,13 @@ def compute_send_amount(w3, balance_wei, fee_mode="cheap", gas_limit=21000, rese
 def send_native(w3, pk, to_addr, value_wei, fee_mode="cheap", gas_limit=21000):
     acct = Account.from_key(pk)
     fees = _guess_fees(w3, mode=fee_mode)
+
+    # --- NEW: ambil chainId dari RPC ---
+    try:
+        chain_id = w3.eth.chain_id
+    except Exception:
+        chain_id = None
+
     tx = {
         "from": acct.address,
         "to": w3.to_checksum_address(to_addr),
@@ -246,6 +253,11 @@ def send_native(w3, pk, to_addr, value_wei, fee_mode="cheap", gas_limit=21000):
         "gas": gas_limit,
     }
     tx.update(fees)
+
+    # --- NEW: set chainId bila tersedia (wajib utk BSC, Arbitrum, dll) ---
+    if chain_id is not None:
+        tx["chainId"] = chain_id
+
     signed = acct.sign_transaction(tx)
     txh = _send_raw_tx(w3, signed)
     return txh.hex()
@@ -255,17 +267,30 @@ def send_erc20(w3, pk, token_addr, to_addr, amount_wei, fee_mode="cheap", gas_bu
     c = token_contract(w3, token_addr)
     fn = c.functions.transfer(w3.to_checksum_address(to_addr), int(amount_wei))
     fees = _guess_fees(w3, mode=fee_mode)
+
+    # --- NEW: chainId dari RPC ---
+    try:
+        chain_id = w3.eth.chain_id
+    except Exception:
+        chain_id = None
+
     try:
         est = fn.estimate_gas({"from": acct.address})
         gas_limit = int(est * gas_buffer)
     except Exception:
         gas_limit = int(100000 * gas_buffer)
-    tx = fn.build_transaction({
+
+    tx = {
         "from": acct.address,
         "nonce": w3.eth.get_transaction_count(acct.address),
         "gas": gas_limit,
         **fees,
-    })
+    }
+    # --- NEW: set chainId kalau ada ---
+    if chain_id is not None:
+        tx["chainId"] = chain_id
+
+    tx = fn.build_transaction(tx)
     signed = acct.sign_transaction(tx)
     txh = _send_raw_tx(w3, signed)
     return txh.hex(), gas_limit
