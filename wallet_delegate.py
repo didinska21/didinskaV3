@@ -524,7 +524,12 @@ def _get_chain_thresholds(ck, w3):
 def monitor_loop(chains_map, fee_mode="cheap", poll_interval=12, dry_run=False):
     """
     chains_map: { chain_key: [ {address,label,pk}, ... ] }
-    Proses: untuk tiap EOA -> kirim semua ERC20 (jika ada & >0) -> lalu kirim native sisa (balance - gas - reserve)
+    Proses per loop:
+      - untuk tiap chain & tiap EOA:
+        1) kirim semua ERC20 (kalau ada & balance > 0)
+        2) cek saldo native
+        3) hitung smart send: saldo - estimasi gas - reserve
+        4) kalau send_amt > 0 -> auto kirim ke sink
     """
     print_info(f"Mulai monitor {len(chains_map)} chain | fee_mode={fee_mode} | interval={poll_interval}s | dry_run={dry_run}")
     try:
@@ -533,28 +538,31 @@ def monitor_loop(chains_map, fee_mode="cheap", poll_interval=12, dry_run=False):
                 w3, _, _ = connect_chain(ck)
                 if not w3:
                     continue
-                # sink
-                sink = _ensure_rules().get("default_sink")
-                if not sink:
-                    print_warning("Default sink belum di-set. Lewati monitor."); return
 
-                tokens = (_ensure_rules().get("erc20", {}) or {}).get(ck, [])
+                rules = _ensure_rules()
+                sink = rules.get("default_sink")
+                if not sink:
+                    print_warning("Default sink belum di-set. Lewati monitor."); 
+                    return
+
+                tokens = (rules.get("erc20", {}) or {}).get(ck, [])
                 threshold_wei, reserve_wei = _get_chain_thresholds(ck, w3)
 
                 for entry in items:
-                    addr = entry.get("address"); label = entry.get("label") or addr
-                    pk = entry.get("pk")
+                    addr  = entry.get("address")
+                    label = entry.get("label") or addr
+                    pk    = entry.get("pk")
                     if not pk:
                         log.warning("[%s][%s] PK tidak ditemukan, skip.", ck, addr)
                         continue
+
                     try:
                         sender = w3.to_checksum_address(addr)
-                        bal = w3.eth.get_balance(sender)
-                    except Exception as e:
-                        log.warning("[%s][%s] gagal get_balance: %s", ck, addr, e)
+                    except Exception:
+                        log.warning("[%s][%s] alamat tidak valid", ck, addr)
                         continue
 
-                    # --- Prioritas ERC20 ---
+                    # --- 1) Prioritas ERC20 dulu ---
                     if tokens:
                         for taddr in tokens:
                             try:
@@ -562,36 +570,61 @@ def monitor_loop(chains_map, fee_mode="cheap", poll_interval=12, dry_run=False):
                                 tbal = c.functions.balanceOf(sender).call()
                                 if int(tbal) <= 0:
                                     continue
+
                                 if dry_run:
                                     print_info(f"[{ck}] {addr} ERC20 {taddr} -> {sink} amount={tbal} (dry-run)")
                                 else:
                                     txh, gas_limit = send_erc20(w3, pk, taddr, sink, tbal, fee_mode=fee_mode)
                                     print_success(f"[{ck}] ERC20 sent {taddr} tx={txh}")
                                     log.info("[%s] erc20 %s from %s -> %s", ck, taddr, addr, txh)
+
                             except ContractLogicError as ce:
                                 log.warning("[%s][%s] ERC20 fail: %s", ck, addr, ce)
                             except Exception as e:
                                 log.warning("[%s][%s] ERC20 error token %s: %s", ck, addr, taddr, e)
 
-                    # --- Lalu native (sisa) ---
+                    # --- 2) Cek saldo native terbaru ---
                     try:
-                        bal = w3.eth.get_balance(sender)  # refresh setelah ERC20 tx
-                    except Exception:
+                        bal = w3.eth.get_balance(sender)
+                    except Exception as e:
+                        log.warning("[%s][%s] gagal get_balance: %s", ck, addr, e)
                         continue
-                    if bal <= threshold_wei:
-                        continue
-                    send_amt, gas_cost = compute_send_amount(w3, bal, fee_mode=fee_mode, gas_limit=21000, reserve_wei=reserve_wei)
+
+                    # --- 3) Hitung smart send: saldo - fee - reserve ---
+                    send_amt, gas_cost = compute_send_amount(
+                        w3,
+                        bal,
+                        fee_mode=fee_mode,
+                        gas_limit=21000,
+                        reserve_wei=reserve_wei
+                    )
+
+                    # log info saldo & rencana kirim (seperti smart send, tapi otomatis)
+                    print_info(
+                        f"[{ck}] {addr} | saldo={wei_to_eth(w3, bal)} "
+                        f"| reserve={wei_to_eth(w3, reserve_wei)} "
+                        f"| gas≈{wei_to_eth(w3, gas_cost)} "
+                        f"| kirim≈{wei_to_eth(w3, send_amt)}"
+                    )
+
+                    # Kalau tidak cukup untuk menutup gas + reserve -> skip
                     if send_amt <= 0:
+                        # kalau mau, bisa tambahin debug:
+                        # log.info("[%s][%s] saldo belum cukup untuk gas+reserve", ck, addr)
                         continue
+
+                    # --- 4) Kirim native ke sink ---
                     if dry_run:
                         print_info(f"[{ck}] {addr} native -> {sink} amount={wei_to_eth(w3, send_amt)} (dry-run)")
                     else:
                         try:
                             txh = send_native(w3, pk, sink, send_amt, fee_mode=fee_mode, gas_limit=21000)
                             print_success(f"[{ck}] Native sent tx={txh}")
-                            log.info("[%s] native from %s -> %s", ck, addr, txh)
+                            log.info("[%s] native from %s -> %s amount=%s tx=%s",
+                                     ck, addr, sink, wei_to_eth(w3, send_amt), txh)
                         except Exception as e:
                             print_error(f"[{ck}] Gagal send native dari {addr}: {e}")
+
             time.sleep(poll_interval)
     except KeyboardInterrupt:
         print_info("Monitor berhenti.")
